@@ -52,7 +52,8 @@ pub struct Client {
     mode              : ClientMode,
     team              : Option<usize>,
     commandah         : tokio::sync::mpsc::Sender<ServerCommand>,
-    is_team_leader    : bool
+    is_team_leader    : bool,
+    places_this_turn  : u8
 }
 
 
@@ -785,7 +786,8 @@ impl Client {
             mode: ClientMode::None,
             team: None,
             commandah,
-            is_team_leader: false
+            is_team_leader: false,
+            places_this_turn: 0
         }
     }
 
@@ -895,6 +897,10 @@ impl Client {
             match message.command {
                 'p' => {
                     if message.args.len() == 3 {
+                        self.places_this_turn += 1;
+                        if self.places_this_turn > 15 {
+                            return;
+                        }
                         let tp = &message.args[0];
                         let x = message.args[1].parse::<f32>();
                         let y = message.args[2].parse::<f32>();
@@ -1193,6 +1199,9 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
             command = receiver.recv().fuse() => {
                 match command {
                     Ok (ClientCommand::Tick (counter, modechar)) => {
+                        if modechar == "0" { // if it's play mode
+                            moi.places_this_turn = 0;
+                        }
                         server.lock().await.winning_banner = moi.banner;
                         let mut args = vec![counter.to_string(), modechar];
                         if moi.m_castle.is_some() {
