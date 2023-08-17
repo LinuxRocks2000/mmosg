@@ -897,10 +897,10 @@ impl Client {
             match message.command {
                 'p' => {
                     if message.args.len() == 3 {
-                        self.places_this_turn += 1;
-                        if self.places_this_turn > 15 {
+                        if self.places_this_turn >= 14 {
                             return;
                         }
+                        self.places_this_turn += 1;
                         let tp = &message.args[0];
                         let x = message.args[1].parse::<f32>();
                         let y = message.args[2].parse::<f32>();
