@@ -1,0 +1,111 @@
+body {
+    margin: 0px;
+    padding: 0px;
+    overflow: hidden;
+    max-height: 100vh;
+    background-color: #1F1E23;
+    color: #ACCF74;
+    font-family: "Roboto Mono";
+}
+
+h1,
+h2,
+h3 {
+    color: #D8965A;
+    text-align: center;
+}
+
+h1 {
+    font-size: 8em;
+    font-style: italic;
+}
+
+input,
+select,
+button {
+    background-color: #327963;
+    color: #ACCF74;
+    border: none;
+    outline: none;
+}
+
+#mainscreen {
+    /*position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);*/
+    text-align: center;
+    padding-left: 20vh;
+    padding-right: 20vh;
+    overflow-y: scroll;
+    display: inline-block;
+    max-height: 100vh;
+}
+
+#start {
+    border: none;
+    padding: 20px;
+    background-color: red;
+    font-weight: bold;
+    font-size: 2em;
+}
+
+#game {
+    width: 100vw;
+    height: 100vh;
+    position: absolute;
+    top: 0px;
+    left: 0px;
+}
+
+ul {
+    text-align: left;
+}
+
+#menu {
+    /*padding: 50px;
+                margin: 50px;*/
+    border: 2px solid black;
+    border-radius: 10px;
+    margin: 10px;
+}
+
+#notConnected {
+    position: absolute;
+    top: 0px;
+    left: 0px;
+    padding: 50px;
+    background-color: #111111;
+    color: red;
+    text-align: center;
+}
+
+#enableNotifs {
+    font-size: 3em;
+    position: absolute;
+    bottom: 0px;
+    right: 0px;
+}
+
+.preload_img {
+    display: none;
+}
+
+#team-chat {
+    position: absolute;
+    top: 0px;
+    right: 0px;
+    width: clamp(400px, 20vh, 600px);
+    height: clamp(400px, 20vh, 600px);
+    font-family: monospace;
+    color: white;
+    background-color: black;
+    padding: 10px;
+    overflow-y: auto;
+}
+
+#message {
+    background-color: black;
+    color: white;
+    width: 100%;
+}

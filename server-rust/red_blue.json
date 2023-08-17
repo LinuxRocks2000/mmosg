@@ -1,0 +1,46 @@
+{ 
+    "password": "[UNUSABLE]",
+    "world_size": 5000,
+    "io_mode": false,
+    "map": [
+        {
+            "x": 2500,
+            "y": 1150,
+            "w": 100,
+            "h": 2300
+        },
+        {
+            "x": 2500,
+            "y": 3850,
+            "w": 100,
+            "h": 2300
+        },
+        {
+            "x": 1150,
+            "y": 2500,
+            "w": 2300,
+            "h": 100
+        },
+        {
+            "x": 3850,
+            "y": 2500,
+            "w": 2300,
+            "h": 100
+        }
+    ],
+    "autonomous": {
+        "min_players": 2,
+        "max_players": 10,
+        "timeout": 1000
+    },
+    "teams": [
+        {
+            "name": "Red",
+            "password": "blue"
+        },
+        {
+            "name": "Blue",
+            "password": "red"
+        }
+    ]
+}
