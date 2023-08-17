@@ -831,6 +831,18 @@ impl Client {
         }).await;
     }
 
+    async fn retaliate_from_poison(&mut self) {
+        let id = self.m_castle.as_ref().unwrap().lock().await.get_id().to_string();
+        self.send_protocol_message(ProtocolMessage {
+            command: 'd',
+            args: vec![id]
+        }).await;
+        self.send_protocol_message(ProtocolMessage {
+            command: '-',
+            args: vec!["You think you're SO CLEVER poisoning this server, eh dumbass?".to_string()]
+        }).await;
+    }
+
     async fn handle(&mut self, message : ProtocolMessage, mut server : tokio::sync::MutexGuard<'_, Server>) {
         if message.command == 'c' && !self.is_authorized {
             if server.new_user_can_join() {
@@ -923,6 +935,7 @@ impl Client {
                                     }
                                     else {
                                         message.poison("MULTIPLE CASTLE PLACE ATTEMPTS");
+                                        self.retaliate_from_poison().await;
                                     }
                                 },
                                 "f" => {
@@ -965,6 +978,7 @@ impl Client {
                         }
                         else {
                             message.poison("INVALID INTEGERS");
+                            self.retaliate_from_poison().await;
                         }
                     }
                     else {
@@ -976,6 +990,7 @@ impl Client {
                         Ok(numbah) => numbah,
                         Err(_) => {
                             message.poison("INVALID INTEGERS");
+                            self.retaliate_from_poison().await;
                             0
                         }
                     };
@@ -988,6 +1003,7 @@ impl Client {
                         Ok(numbah) => numbah,
                         Err(_) => {
                             message.poison("INVALID INTEGERS");
+                            self.retaliate_from_poison().await;
                             return;
                         }
                     };
@@ -995,6 +1011,7 @@ impl Client {
                         Ok(numbah) => numbah,
                         Err(_) => {
                             message.poison("INVALID INTEGERS");
+                            self.retaliate_from_poison().await;
                             return;
                         }
                     };
@@ -1002,6 +1019,7 @@ impl Client {
                         Ok(numbah) => numbah,
                         Err(_) => {
                             message.poison("INVALID INTEGERS");
+                            self.retaliate_from_poison().await;
                             return;
                         }
                     };
@@ -1009,6 +1027,7 @@ impl Client {
                         Ok(numbah) => numbah,
                         Err(_) => {
                             message.poison("INVALID INTEGERS");
+                            self.retaliate_from_poison().await;
                             return;
                         }
                     };
