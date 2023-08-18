@@ -1049,7 +1049,7 @@ impl Client {
                     };
                     for object in &server.objects {
                         let mut lock = object.lock().await;
-                        if object.lock().await.get_id() == id && lock.get_banner() == self.banner {
+                        if lock.get_id() == id && lock.get_banner() == self.banner {
                             lock.exposed_properties.goal_x = x;
                             lock.exposed_properties.goal_y = y;
                             lock.exposed_properties.goal_a = a;
