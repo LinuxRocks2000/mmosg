@@ -30,7 +30,7 @@ pub struct TeamDef {
 #[derive(Serialize, Deserialize)]
 struct ServerConfigFile {
     password        : Option<String>,
-    world_size      : u32,
+    world_size      : f32,
     io_mode         : Option<bool>,
     prompt_password : Option<bool>,
     map             : Vec<ObjectDef>,

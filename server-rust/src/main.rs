@@ -25,6 +25,7 @@ use prng::Mulberry32;
 use crate::gamepiece::fighters::*;
 use crate::gamepiece::misc::*;
 use crate::gamepiece::npc;
+use crate::physics::BoxShape;
 use crate::config::Config;
 use futures::future::FutureExt; // for `.fuse()`
 use tokio::select;
@@ -91,7 +92,7 @@ pub struct Server {
     objects           : Vec<Arc<Mutex<GamePieceBase>>>,
     teams             : Vec<TeamData>,
     banners           : Vec<Arc<String>>,
-    gamesize          : u32,
+    gamesize          : f32,
     authenticateds    : u32,
     terrain_seed      : u32,
     top_id            : u32,
@@ -133,14 +134,58 @@ impl Server {
         return moidah;
     }
 
-    async fn place(&mut self, piece : Box<dyn GamePiece + Send + Sync>, x : f32, y : f32, a : f32, mut sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        let la_thang = GamePieceBase::new(piece, x, y, a);
-        if self.costs && sender.is_some() {
-            let cost = la_thang.cost() as i32;
-            if cost > sender.as_ref().unwrap().score {
-                return Arc::new(Mutex::new(la_thang));
+    fn object_field_check(&self, object : BoxShape, x : f32, y : f32) -> bool {
+        object.ong_fr().bigger(800.0).contains(x, y) // this ong frs it first because contains doesn't really work on rotated objects
+    }
+
+    async fn is_inside_friendly(&self, x : f32, y : f32, banner : usize, tp : char) -> bool {
+        for obj in &self.objects {
+            let lock = obj.lock().await;
+            if lock.identify() == tp {
+                if lock.get_banner() == banner {
+                    if self.object_field_check(lock.exposed_properties.physics.shape, x, y) {
+                        return true; // short circuit
+                    }
+                }
             }
-            sender.as_mut().unwrap().collect(-cost).await;
+        }
+        return false;
+    }
+
+    async fn is_clear(&self, x : f32, y : f32) -> bool {
+        for obj in &self.objects {
+            let lock = obj.lock().await;
+            if self.object_field_check(lock.exposed_properties.physics.shape, x, y) {
+                return false; // short circuit
+            }
+        }
+        return true;
+    }
+
+    async fn place(&mut self, piece : Box<dyn GamePiece + Send + Sync>, x : f32, y : f32, a : f32, mut sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
+        let zone = piece.req_zone();
+        let la_thang = GamePieceBase::new(piece, x, y, a);
+        if sender.is_some() {
+            let banner = sender.as_ref().unwrap().banner;
+            if !match zone {
+                ReqZone::NoZone => true,
+                ReqZone::WithinCastleOrFort => {
+                    self.is_inside_friendly(x, y, banner, 'c').await || self.is_inside_friendly(x, y, banner, 'F').await
+                },
+                ReqZone::AwayFromThings => {
+                    self.is_clear(x, y).await
+                }
+            } {
+                sender.as_mut().unwrap().kys = true; // drop the client, something nefarious is going on
+                return Arc::new(Mutex::new(la_thang)); // refuse to place, returning a doomed object. This is a nasty trick for people who evade the place restrictions because they'll find themselves with $100 in the bank - and no castle to their name!
+            }
+            if self.costs {
+                let cost = la_thang.cost() as i32;
+                if cost > sender.as_ref().unwrap().score {
+                    return Arc::new(Mutex::new(la_thang));
+                }
+                sender.as_mut().unwrap().collect(-cost).await;
+            }
         }
         let ret = Arc::new(Mutex::new(la_thang));
         self.add(ret.clone(), sender).await;
@@ -209,8 +254,8 @@ impl Server {
             return;
         }
         let mut randlock = self.random.lock().await;
-        let x : f32 = (randlock.next() % self.gamesize) as f32;
-        let y : f32 = (randlock.next() % self.gamesize) as f32;
+        let x = randlock.next() as f32 % self.gamesize;
+        let y = randlock.next() as f32 % self.gamesize;
         let chance = randlock.next() % 6;
         drop(randlock);
         let thing : Box<dyn GamePiece + Send + Sync> = match chance {
@@ -245,8 +290,8 @@ impl Server {
 
     async fn place_random_rubble(&mut self) { // Drop a random chest or wall (or something else, if I add other things)
         let mut randlock = self.random.lock().await;
-        let x : f32 = (randlock.next() % self.gamesize) as f32;
-        let y : f32 = (randlock.next() % self.gamesize) as f32;
+        let x = randlock.next() as f32 % self.gamesize;
+        let y = randlock.next() as f32 % self.gamesize;
         let chance = randlock.next() % 100;
         drop(randlock);
         let thing : Box<dyn GamePiece + Send + Sync> = {
@@ -542,7 +587,7 @@ impl Server {
 
     async fn start(&mut self) {
         if self.mode == GameMode::Waiting {
-            for _ in 0..((self.gamesize * self.gamesize) / 1000000) { // One per 1,000,000 square pixels
+            for _ in 0..(((self.gamesize * self.gamesize) / 1000000.0) as u32) { // One per 1,000,000 square pixels
                 self.place_random_rubble().await; // THIS FUNCTION IS AT FAULT!!!!!!!!!!!!!! THE PROBLEM IS HERE!!!!!!!!!!!!! ##########################
             }
             self.set_mode(GameMode::Strategy);
@@ -917,6 +962,10 @@ impl Client {
                         if x.is_ok() && y.is_ok(){
                             let x = x.unwrap();
                             let y = y.unwrap();
+                            if x < 0.0 || x > server.gamesize || y < 0.0 || y > server.gamesize { 
+                                self.kys = true;
+                                return;
+                            }
                             match tp.as_str() {
                                 "c" => {
                                     if !self.has_placed {
@@ -1355,7 +1404,7 @@ async fn main(){
         config              : Some(Arc::new(Config::new(&args[1]))),
         objects             : vec![],
         teams               : vec![],
-        gamesize            : 5000,
+        gamesize            : 5000.0,
         authenticateds      : 0,
         terrain_seed        : rng.gen(),
         banners             : vec![Arc::new("None".to_string())],

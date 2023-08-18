@@ -52,6 +52,14 @@ pub enum BulletType {
 }
 
 
+#[derive(Debug)]
+pub enum ReqZone { // Placing zone.
+    NoZone, // can place anywhere
+    WithinCastleOrFort, // most common one: can only place inside your sphere of influence
+    AwayFromThings // castles and forts are this: cannot be placed near things
+}
+
+
 #[derive(Clone)]
 pub struct Targeting {
     mode      : TargetingMode,
@@ -87,6 +95,10 @@ pub enum ExplosionMode {
 pub trait GamePiece {
     fn construct<'a>(&'a self, _properties : &mut ExposedProperties) {
         
+    }
+
+    fn req_zone(&self) -> ReqZone {
+        ReqZone::WithinCastleOrFort
     }
 
     fn identify(&self) -> char;
@@ -472,6 +484,10 @@ impl GamePiece for Castle {
         else{
             PhysicsObject::new(0.0, 0.0, 50.0, 50.0, 0.0)
         }
+    }
+
+    fn req_zone(&self) -> ReqZone {
+        ReqZone::AwayFromThings
     }
 
     fn construct<'a>(&'a self, thing : &mut ExposedProperties) {

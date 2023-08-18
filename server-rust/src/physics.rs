@@ -113,6 +113,53 @@ impl BoxShape {
     pub fn rotate(&mut self, velocity : f32) {
         self.a += velocity;
     }
+
+    fn from_corners(x1 : f32, y1 : f32, x2 : f32, y2 : f32) -> Self {
+        Self {
+            x : (x1 + x2) / 2.0,
+            y : (y1 + y2) / 2.0,
+            w : x2 - x2,
+            h : y2 - y1,
+            a : 0.0
+        }
+    }
+
+    pub fn ong_fr(&self) -> BoxShape { // create a high-quality bounding box of this BoxShape, but slower than worst()
+        let points = self.points();
+        let mut lowest_x = self.x;
+        let mut lowest_y = self.y;
+        let mut highest_x = self.x;
+        let mut highest_y = self.y;
+        for point in points {
+            if point.x > highest_x {
+                highest_x = point.x;
+            }
+            if point.x < lowest_x {
+                lowest_x = point.x;
+            }
+            if point.y > highest_y {
+                highest_y = point.y;
+            }
+            if point.y < lowest_y {
+                lowest_y = point.y;
+            }
+        }
+        Self::from_corners(lowest_x, lowest_y, highest_x, highest_y)
+    }
+
+    pub fn bigger(&self, amount : f32) -> Self {
+        Self {
+            x : self.x,
+            y : self.y, 
+            w : self.w + amount,
+            h : self.h + amount,
+            a : self.a
+        }
+    }
+
+    pub fn contains(&self, x : f32, y : f32) -> bool {
+        x > self.x - self.w/2.0 && x < self.x + self.w/2.0 && y > self.y - self.h/2.0 && y < self.y + self.h/2.0
+    }
 }
 
 
