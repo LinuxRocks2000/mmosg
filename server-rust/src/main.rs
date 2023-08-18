@@ -53,7 +53,8 @@ pub struct Client {
     team              : Option<usize>,
     commandah         : tokio::sync::mpsc::Sender<ServerCommand>,
     is_team_leader    : bool,
-    places_this_turn  : u8
+    places_this_turn  : u8,
+    kys               : bool
 }
 
 
@@ -598,6 +599,9 @@ impl Server {
     }
 
     async fn banner_add(&mut self, mut dispatcha : Option<&mut Client>, banner : Arc<String>) -> usize {
+        if dispatcha.is_some() && banner == Arc::new("Puheen is a femboy".to_string()) {
+            dispatcha.as_mut().unwrap().kys = true;
+        }
         let bannah = self.banners.len();
         let mut args = vec![bannah.to_string(), banner.to_string()];
         println!("Created new banner {}, {}", self.banners.len(), banner);
@@ -787,7 +791,8 @@ impl Client {
             team: None,
             commandah,
             is_team_leader: false,
-            places_this_turn: 0
+            places_this_turn: 0,
+            kys: false
         }
     }
 
@@ -834,15 +839,11 @@ impl Client {
     }
 
     async fn retaliate_from_poison(&mut self) {
-        let id = self.m_castle.as_ref().unwrap().lock().await.get_id().to_string();
-        self.send_protocol_message(ProtocolMessage {
-            command: 'd',
-            args: vec![id]
-        }).await;
         self.send_protocol_message(ProtocolMessage {
             command: '-',
-            args: vec!["You think you're SO CLEVER poisoning this server, eh dumbass?".to_string()]
+            args: vec!["Your poisoning attempts have FAILED. EAT DISCONNECT!".to_string()]
         }).await;
+        self.kys = true;
     }
 
     async fn handle(&mut self, message : ProtocolMessage, mut server : tokio::sync::MutexGuard<'_, Server>) {
@@ -1048,7 +1049,7 @@ impl Client {
                     };
                     for object in &server.objects {
                         let mut lock = object.lock().await;
-                        if lock.get_id() == id {
+                        if self.m_castle.is_some() && object.lock().await.get_id() == id && lock.get_banner() == self.m_castle.as_ref().unwrap().lock().await.get_banner() {
                             lock.exposed_properties.goal_x = x;
                             lock.exposed_properties.goal_y = y;
                             lock.exposed_properties.goal_a = a;
@@ -1195,6 +1196,9 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                                 let p = ProtocolMessage::parse_string(text.to_string());
                                 if p.is_some() {
                                     moi.handle(p.unwrap() /* If it made it this far, there's data to unwrap */, serverlock).await;
+                                    if moi.kys { // if it's decided to break the connection
+                                        break 'cliloop;
+                                    }
                                 }
                             }
                         }
