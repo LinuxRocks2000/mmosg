@@ -1,4 +1,5 @@
 use crate::vector::Vector2;
+use std::f32::consts::PI;
 
 #[derive(Copy, Clone)]
 pub struct BoxShape {
@@ -20,26 +21,26 @@ impl BoxShape {
         }
     }
 
-    pub fn worst(&self) -> BoxShape { // The goal here is not to get an accurate idea of a bounding box, just to get a bounding box that is certain to contain the actual rectangle and get it really fast
+    pub fn worst(&self) -> BoxShape { // The goal here is not to get an accurate bounding box, just to get a rough bounding box that is certain to contain the actual rectangle and get it really fast
         let long = self.w + self.h; // This is guaranteed to be longer than the longest straight line you can fit in the rectangle.
         BoxShape {
-            x : self.x - long, 
-            y : self.y - long,
-            w : long * 2.0,
-            h : long * 2.0,
+            x : self.x, 
+            y : self.y,
+            w : long,
+            h : long,
             a : 0.0
-        } // Improve this later.
+        }
     }
 
     pub fn get_perp_axes(&self) -> Vec<Vector2> {
         vec![
-            Vector2::new(self.w, 0.0), // No need to perpendicularize these two - they *are* their own perpendiculars.
-            Vector2::new(0.0, self.w) // For the other two sides, the angle comes out the same, and the angle is the only important component. Thus: optimize by leaving 'em out.
+            Vector2::new_from_manda(1.0, self.a), // No need to perpendicularize these two - they *are* their own perpendiculars.
+            Vector2::new_from_manda(1.0, self.a + PI/2.0) // For the other two sides, the angle comes out the same, and the angle is the only important component. Thus: optimize by leaving 'em out.
         ]
     }
 
     pub fn points(&self) -> Vec<Vector2> {
-        let to_origin = Vector2::new(self.x + self.w/2.0, self.y + self.h/2.0);
+        let to_origin = Vector2::new(self.x, self.y);
         let o_tl = Vector2::new(-self.w/2.0, -self.h/2.0);
         let o_tr = Vector2::new(self.w/2.0, -self.h/2.0);
         let o_bl = Vector2::new(-self.w/2.0, self.h/2.0);
@@ -77,7 +78,7 @@ impl BoxShape {
         let mbx = self.worst();
         let tbx = other.worst();
         let mut mtv = Vector2::empty();
-        if (mbx.x < tbx.x + tbx.w) && (mbx.y < tbx.y + tbx.h) && (mbx.x + mbx.w > tbx.x) && (mbx.y + mbx.h > tbx.y) { // Short circuit: if there's no fast, crappy collision between the two, as is the case 90% of the time, don't bother doing a slow, accurate collision
+        if (mbx.x - mbx.w/2.0 < tbx.x + tbx.w/2.0) && (mbx.y - mbx.h/2.0 < tbx.y + tbx.h/2.0) && (mbx.x + mbx.w/2.0 > tbx.x - tbx.w/2.0) && (mbx.y + mbx.h/2.0 > tbx.y - tbx.h/2.0) { // Short circuit: if there's no fast, crappy collision between the two, as is the case 90% of the time, don't bother doing a slow, accurate collision
             let mut axes : Vec<Vector2> = self.get_perp_axes();
             let mut other_axes : Vec<Vector2> = other.get_perp_axes();
             axes.append(&mut other_axes);
@@ -116,8 +117,8 @@ impl BoxShape {
 
     fn from_corners(x1 : f32, y1 : f32, x2 : f32, y2 : f32) -> Self {
         Self {
-            x : x1,
-            y : y1,
+            x : (x1 + x2) / 2.0,
+            y : (y1 + y2) / 2.0,
             w : x2 - x1,
             h : y2 - y1,
             a : 0.0
@@ -126,10 +127,10 @@ impl BoxShape {
 
     pub fn ong_fr(&self) -> BoxShape { // create a high-quality bounding box of this BoxShape, but slower than worst()
         let points = self.points();
-        let mut lowest_x = self.x + self.w/2.0;
-        let mut lowest_y = self.y + self.h/2.0;
-        let mut highest_x = self.x - self.w/2.0;
-        let mut highest_y = self.y - self.h/2.0;
+        let mut lowest_x = self.x;
+        let mut lowest_y = self.y;
+        let mut highest_x = self.x;
+        let mut highest_y = self.y;
         for point in points {
             if point.x > highest_x {
                 highest_x = point.x;
@@ -226,11 +227,11 @@ impl PhysicsObject {
     }
 
     pub fn cx(&self) -> f32 {
-        self.shape.x + self.shape.w/2.0
+        self.shape.x
     }
 
     pub fn cy(&self) -> f32 {
-        self.shape.y + self.shape.h/2.0
+        self.shape.y
     }
 
     pub fn angle(&self) -> f32 {
@@ -242,11 +243,11 @@ impl PhysicsObject {
     }
 
     pub fn set_cx(&mut self, x : f32) {
-        self.shape.x = x - self.shape.w / 2.0;
+        self.shape.x = x;
     }
 
     pub fn set_cy(&mut self, y : f32) {
-        self.shape.y = y - self.shape.h / 2.0;
+        self.shape.y = y;
     }
 
     pub fn set_angle(&mut self, a : f32) {

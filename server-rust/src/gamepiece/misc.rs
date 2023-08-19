@@ -179,7 +179,7 @@ impl GamePiece for Carrier {
     fn drop_carry(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties, berth : usize) {
         let berth_y : bool = berth % 2 == 0;
         let berth_x : usize = berth / 2;
-        let mut new_pos = Vector2::new(me.physics.cx() - me.physics.shape.w/2.0 + berth_x as f32 * 80.0 + 35.0, me.physics.cy() - me.physics.shape.h/2.0 + if berth_y { -40.0 } else { me.physics.shape.h + 40.0 });
+        let mut new_pos = Vector2::new(me.physics.cx() - me.physics.shape.w/2.0 + berth_x as f32 * 80.0 + 35.0, if berth_y { me.physics.shape.y - me.physics.shape.h/2.0 - thing.physics.shape.h } else { me.physics.shape.h/2.0 + me.physics.shape.y + thing.physics.shape.h });
         new_pos = new_pos.rotate_about(Vector2::new(me.physics.cx(), me.physics.cy()), me.physics.angle());
         thing.physics.set_cx(new_pos.x);
         thing.physics.set_cy(new_pos.y);
