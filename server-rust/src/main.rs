@@ -963,7 +963,7 @@ impl Client {
             match message.command {
                 'p' => {
                     if message.args.len() == 3 {
-                        if self.places_this_turn >= 14 {
+                        if self.places_this_turn >= 30 {
                             return;
                         }
                         if server.mode != GameMode::Strategy && message.args[0] != "c"{ // if it is trying to place an object, but it isn't strat mode and it isn't placing a castle
