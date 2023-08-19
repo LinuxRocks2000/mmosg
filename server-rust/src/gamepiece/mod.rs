@@ -366,6 +366,17 @@ impl GamePieceBase {
                 self.piece.drop_carry(&mut self.exposed_properties, &mut lock.exposed_properties, i as usize);
                 self.exposed_properties.carrier_properties.space_remaining += 1;
                 lock.exposed_properties.carrier_properties.is_carried = false;
+                /*drop(lock);
+                self.exposed_properties.carrier_properties.carrying.remove(i as usize);
+                i -= 1;*/
+            }
+            i += 1;
+        }
+        i = 0;
+        while i < self.exposed_properties.carrier_properties.carrying.len() as i32 { // remove everything AFTER they've been released, so reordering doesn't cause problems above
+            let clone = self.exposed_properties.carrier_properties.carrying[i as usize].clone();
+            let lock = clone.lock().await;
+            if !lock.exposed_properties.carrier_properties.is_carried {
                 drop(lock);
                 self.exposed_properties.carrier_properties.carrying.remove(i as usize);
                 i -= 1;
@@ -441,6 +452,13 @@ impl GamePieceBase {
 
                 }
             }
+        }
+        for carried in &self.exposed_properties.carrier_properties.carrying {
+            let mut lock = carried.lock().await;
+            lock.exposed_properties.carrier_properties.is_carried = false;
+            lock.exposed_properties.goal_x = lock.exposed_properties.physics.cx();
+            lock.exposed_properties.goal_y = lock.exposed_properties.physics.cy();
+            lock.exposed_properties.goal_a = lock.exposed_properties.physics.angle();
         }
     }
 

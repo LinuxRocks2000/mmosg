@@ -121,10 +121,10 @@ impl GamePiece for Bullet {
 
 impl GamePiece for Carrier {
     fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
-        thing.health_properties.max_health = 10.0;
-        thing.health_properties.passive_heal = 0.002;
+        thing.health_properties.max_health = 6.0;
+        thing.health_properties.passive_heal = 0.01;
         thing.collision_info.damage = 1.0;
-        thing.physics.speed_cap = 2.0;
+        thing.physics.speed_cap = 3.0;
         thing.carrier_properties.space_remaining = 10;
         thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't'];
     }
@@ -151,7 +151,7 @@ impl GamePiece for Carrier {
     }
 
     fn cost(&self) -> u32 {
-        60
+        80
     }
 
     fn is_editable(&self) -> bool {
@@ -179,7 +179,8 @@ impl GamePiece for Carrier {
     fn drop_carry(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties, berth : usize) {
         let berth_y : bool = berth % 2 == 0;
         let berth_x : usize = berth / 2;
-        let mut new_pos = Vector2::new(me.physics.cx() - me.physics.shape.w/2.0 + berth_x as f32 * 80.0 + 35.0, if berth_y { me.physics.shape.y - me.physics.shape.h/2.0 - thing.physics.shape.h } else { me.physics.shape.h/2.0 + me.physics.shape.y + thing.physics.shape.h });
+        let outsize =  if thing.physics.shape.w > thing.physics.shape.h { thing.physics.shape.w } else { thing.physics.shape.h };
+        let mut new_pos = Vector2::new(me.physics.cx() - me.physics.shape.w/2.0 + berth_x as f32 * 80.0 + 35.0, if berth_y { me.physics.shape.y - me.physics.shape.h/2.0 - outsize } else { me.physics.shape.h/2.0 + me.physics.shape.y + outsize });
         new_pos = new_pos.rotate_about(Vector2::new(me.physics.cx(), me.physics.cy()), me.physics.angle());
         thing.physics.set_cx(new_pos.x);
         thing.physics.set_cy(new_pos.y);
