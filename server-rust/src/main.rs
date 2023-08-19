@@ -135,7 +135,7 @@ impl Server {
     }
 
     fn object_field_check(&self, object : BoxShape, x : f32, y : f32) -> bool {
-        object.ong_fr().bigger(800.0).contains(x, y) // this ong frs it first because contains doesn't really work on rotated objects
+        object.ong_fr().bigger(801.0).contains(Vector2::new(x, y)) // this ong frs it first because contains doesn't really work on rotated objects
     }
 
     async fn is_inside_friendly(&self, x : f32, y : f32, banner : usize, tp : char) -> bool {
@@ -1595,6 +1595,9 @@ async fn main(){
 pub mod tests {
     use crate::Vector2;
     use crate::gamepiece::npc;
+    use crate::BoxShape;
+    use crate::functions::*;
+    use std::f32::consts::PI;
     #[test]
     fn check_vector_creation() {
         let vec = Vector2::new_from_manda(1.0, 0.0);
@@ -1633,14 +1636,32 @@ pub mod tests {
 
     #[test]
     fn check_loopize_basics() {
-        assert_eq!(npc::loopize(1.0, 2.0), -1.0);
-        assert_eq!(npc::loopize(1.0, 0.0), 1.0);
+        assert_eq!(loopize(1.0, 2.0), -1.0);
+        assert_eq!(loopize(1.0, 0.0), 1.0);
     }
 
     #[test]
     fn check_loopize_complex() {
-        assert_eq!(npc::loopize(1.0, -1.0), 2.0);
-        assert_eq!(npc::loopize(-1.0, 1.0), -2.0);
-        assert_eq!(npc::loopize_about(2.0, 0.0, 3.0), -1.0);
+        assert_eq!(loopize(1.0, -1.0), 2.0);
+        assert_eq!(loopize(-1.0, 1.0), -2.0);
+        assert_eq!(loopize_about(2.0, 0.0, 3.0), -1.0);
+    }
+
+    #[test]
+    fn check_box_contains() {
+        let mut shape = BoxShape {
+            x : 0.0,
+            y : 0.0,
+            w : 10.0,
+            h : 10.0,
+            a : 0.0
+        };
+        assert!(shape.contains(Vector2::new(-4.0, 0.0)));
+        assert!(!shape.contains(Vector2::new(-5.0, 0.0)));
+        shape.a = PI/4.0;
+        assert!(shape.contains(Vector2::new(-7.0, 0.0)));
+        assert!(!shape.contains(Vector2::new(-8.0, 0.0)));
+        shape.a = PI/8.0;
+        assert!(shape.contains(Vector2::new(-4.0, 0.0)));
     }
 }

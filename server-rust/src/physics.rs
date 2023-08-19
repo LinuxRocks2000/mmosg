@@ -157,8 +157,9 @@ impl BoxShape {
         }
     }
 
-    pub fn contains(&self, x : f32, y : f32) -> bool {
-        x > self.x - self.w/2.0 && x < self.x + self.w/2.0 && y > self.y - self.h/2.0 && y < self.y + self.h/2.0
+    pub fn contains(&self, point : Vector2) -> bool {
+        let cmp = point.rotate_about(Vector2::new(self.x, self.y), -self.a);
+        cmp.x > self.x - self.w/2.0 && cmp.x < self.x + self.w/2.0 && cmp.y > self.y - self.h/2.0 && cmp.y < self.y + self.h/2.0
     }
 }
 

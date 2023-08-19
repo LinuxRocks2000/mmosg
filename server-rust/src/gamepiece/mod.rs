@@ -519,7 +519,7 @@ impl GamePiece for Castle {
             id != 'c' // The only thing RTFs don't collide with is castles. After all, they *are* a type of fighter.
         }
         else {
-            id == 'b' || id == 'r' // All they collide with is bullets and radiation.
+            id == 'b' || id == 'r' || id == 'h' // All they collide with is bullets and radiation.
         }
     }
 

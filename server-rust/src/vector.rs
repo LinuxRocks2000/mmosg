@@ -120,6 +120,11 @@ impl Vector2 {
     pub fn sqrt(&self) -> Vector2 {
         Vector2::new_from_manda(self.magnitude().sqrt(), self.angle())
     }
+
+    pub fn rotate_about(&self, origin : Vector2, amount : f32) -> Self {
+        let rel = *self - origin; // get where the vector is relative to origin
+        origin + rel.rot(amount) // rotate the origin-d vector, and add back origin
+    }
 }
 
 impl std::fmt::Debug for Vector2 {
