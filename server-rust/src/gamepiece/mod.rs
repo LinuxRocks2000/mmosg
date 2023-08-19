@@ -71,12 +71,29 @@ pub struct Targeting {
 
 
 #[derive(Clone)]
+pub struct CarrierProperties {
+    pub space_remaining : u32, // amount of remaining carrier space
+    pub carrying : Vec<Arc<Mutex<GamePieceBase>>>, // list of things it is carrying
+    pub does_accept : Vec<char>, // list of types it'll carry
+    pub is_carried : bool // if it's being carried at the moment. objects being carried cannot shoot and don't do any collision damage.
+}
+
+
+impl CarrierProperties {
+    pub fn will_carry(&self, thing : char) -> bool {
+        self.does_accept.contains(&thing) && self.space_remaining > 0
+    }
+}
+
+
+#[derive(Clone)]
 pub struct ExposedProperties { // everything a GamePieceBase wants to expose to GamePieces
     pub collision_info     : CollisionInfo,
     pub physics            : PhysicsObject,
     pub shooter_properties : ShooterProperties,
     pub health_properties  : HealthProperties,
     pub targeting          : Targeting,
+    pub carrier_properties : CarrierProperties,
     pub exploder           : Vec<ExplosionMode>,
     pub id                 : u32,
     pub goal_x             : f32,
@@ -132,6 +149,18 @@ pub trait GamePiece {
 
     fn on_upgrade(&mut self, _properties : &mut ExposedProperties, _upgrade : Arc<String>) {
 
+    }
+
+    fn on_carry(&mut self, _properties : &mut ExposedProperties, _thing : &mut ExposedProperties) { // when a new object becomes carried by this
+
+    }
+
+    fn carry_iter(&mut self, _properties : &mut ExposedProperties, _thing : &mut ExposedProperties, _index : usize) -> bool { // called to iterate over every carried object every update
+        false
+    }
+
+    fn drop_carry(&mut self, _properties : &mut ExposedProperties, _thing : &mut ExposedProperties, _index : usize) { // called to iterate over every carried object every update
+        
     }
 }
 
@@ -195,7 +224,13 @@ impl GamePieceBase {
                 physics,
                 ttl : -1,
                 exploder : vec![],
-                id : 0
+                id : 0,
+                carrier_properties : CarrierProperties {
+                    space_remaining : 0,
+                    carrying : vec![],
+                    does_accept : vec![],
+                    is_carried : false
+                }
             },
             broadcasts : vec![],
             forts : vec![],
@@ -288,7 +323,19 @@ impl GamePieceBase {
         self.broadcasts.push(message);
     }
 
+    pub async fn on_carry(&mut self, thing : Arc<Mutex<GamePieceBase>>) {
+        self.exposed_properties.carrier_properties.carrying.push(thing.clone());
+        self.exposed_properties.carrier_properties.space_remaining -= 1;
+        let mut lock = thing.lock().await;
+        lock.exposed_properties.carrier_properties.is_carried = true;
+        lock.exposed_properties.physics.velocity = Vector2::empty();
+        self.piece.on_carry(&mut self.exposed_properties, &mut lock.exposed_properties);
+    }
+
     pub async fn update(&mut self, server : &mut Server) {
+        if self.exposed_properties.carrier_properties.is_carried {
+            return; // quick short circuit: can't update if it's being carried, carriers freeze all activity so it's nice and ready for when it comes back out
+        }
         let mut i : usize = 0;
         while i < self.forts.len() {
             if self.forts[i].lock().await.dead() {
@@ -311,6 +358,20 @@ impl GamePieceBase {
         }
         self.exposed_properties.physics.update();
         self.piece.update(&mut self.exposed_properties, server);
+        let mut i : i32 = 0;
+        while i < self.exposed_properties.carrier_properties.carrying.len() as i32 {
+            let clone = self.exposed_properties.carrier_properties.carrying[i as usize].clone();
+            let mut lock = clone.lock().await;
+            if self.piece.carry_iter(&mut self.exposed_properties, &mut lock.exposed_properties, i as usize) { // drop the carried object
+                self.piece.drop_carry(&mut self.exposed_properties, &mut lock.exposed_properties, i as usize);
+                self.exposed_properties.carrier_properties.space_remaining += 1;
+                lock.exposed_properties.carrier_properties.is_carried = false;
+                drop(lock);
+                self.exposed_properties.carrier_properties.carrying.remove(i as usize);
+                i -= 1;
+            }
+            i += 1;
+        }
         if self.exposed_properties.physics.portals {
             self.exposed_properties.physics.set_cx(coterminal(self.exposed_properties.physics.cx(), server.gamesize as f32));
             self.exposed_properties.physics.set_cy(coterminal(self.exposed_properties.physics.cy(), server.gamesize as f32));

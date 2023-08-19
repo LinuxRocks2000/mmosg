@@ -18,6 +18,7 @@ pub struct Wall {}
 pub struct Chest {}
 pub struct Turret {}
 pub struct MissileLaunchingSystem {}
+pub struct Carrier {}
 pub struct Radiation {
     halflife : f32,
     strength : f32,
@@ -30,6 +31,14 @@ pub struct Block {}
 
 
 impl Bullet {
+    pub fn new() -> Self {
+        Self {
+
+        }
+    }
+}
+
+impl Carrier {
     pub fn new() -> Self {
         Self {
 
@@ -107,6 +116,73 @@ impl GamePiece for Bullet {
 
     fn identify(&self) -> char {
         'b'
+    }
+}
+
+impl GamePiece for Carrier {
+    fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
+        thing.health_properties.max_health = 10.0;
+        thing.health_properties.passive_heal = 0.002;
+        thing.collision_info.damage = 1.0;
+        thing.physics.speed_cap = 2.0;
+        thing.carrier_properties.space_remaining = 10;
+        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't'];
+    }
+
+    fn obtain_physics(&self) -> PhysicsObject {
+        PhysicsObject::new(0.0, 0.0, 400.0, 160.0, 0.0)
+    }
+
+    fn identify(&self) -> char {
+        'K'
+    }
+    
+    fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {
+        let mut thrust = Vector2::new(properties.goal_x - properties.physics.cx(), properties.goal_y - properties.physics.cy());
+        if thrust.magnitude() < 10.0 {
+            properties.physics.set_angle(properties.goal_a);
+            properties.physics.velocity = properties.physics.velocity * 0.7; // airbrake
+        }
+        else {
+            thrust = thrust.unit() * 0.05;
+            properties.physics.set_angle(thrust.angle());
+            properties.physics.velocity = properties.physics.velocity + thrust;
+        }
+    }
+
+    fn cost(&self) -> u32 {
+        60
+    }
+
+    fn is_editable(&self) -> bool {
+        true
+    }
+
+    fn on_carry(&mut self, _properties : &mut ExposedProperties, thing : &mut ExposedProperties) { // when a new object becomes carried by this
+        thing.goal_x = -1.0;
+    }
+
+    fn carry_iter(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties, berth : usize) -> bool {
+        thing.physics.set_angle(me.physics.angle());
+        let berth_y : bool = berth % 2 == 0;
+        let berth_x : usize = berth / 2; // stupid rust can't handle my u8s so I have to waste a lot of space on a usize for these.
+        let mut new_pos = Vector2::new(me.physics.cx() - me.physics.shape.w/2.0 + berth_x as f32 * 80.0 + 35.0, me.physics.cy() - me.physics.shape.h/2.0 + if berth_y { 35.0 } else { me.physics.shape.h - 35.0 });
+        new_pos = new_pos.rotate_about(Vector2::new(me.physics.cx(), me.physics.cy()), me.physics.angle());
+        thing.physics.set_cx(new_pos.x);
+        thing.physics.set_cy(new_pos.y);
+        if thing.goal_x != -1.0 {
+            return true;
+        }
+        false
+    }
+
+    fn drop_carry(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties, berth : usize) {
+        let berth_y : bool = berth % 2 == 0;
+        let berth_x : usize = berth / 2;
+        let mut new_pos = Vector2::new(me.physics.cx() - me.physics.shape.w/2.0 + berth_x as f32 * 80.0 + 35.0, me.physics.cy() - me.physics.shape.h/2.0 + if berth_y { -40.0 } else { me.physics.shape.h + 40.0 });
+        new_pos = new_pos.rotate_about(Vector2::new(me.physics.cx(), me.physics.cy()), me.physics.angle());
+        thing.physics.set_cx(new_pos.x);
+        thing.physics.set_cy(new_pos.y);
     }
 }
 

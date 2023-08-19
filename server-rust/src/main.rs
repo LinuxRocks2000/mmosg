@@ -240,6 +240,10 @@ impl Server {
         self.place(Box::new(AntiRTFBullet::new()), x, y, a, sender).await
     }
 
+    async fn place_carrier(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
+        self.place(Box::new(Carrier::new()), x, y, a, sender).await
+    }
+
     async fn place_radiation(&mut self, x : f32, y : f32, size : f32, halflife : f32, strength : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
         self.place(Box::new(Radiation::new(halflife, strength, size, size)), x, y, a, sender).await
     }
@@ -352,8 +356,21 @@ impl Server {
                 }
                 let mut x_lockah = self.objects[x].lock().await; // Because of the phase shift these should never be the same item.
                 let mut y_lockah = self.objects[y].lock().await;
+                if x_lockah.exposed_properties.carrier_properties.is_carried || y_lockah.exposed_properties.carrier_properties.is_carried {
+                    continue; // Never do any kind of collisions on carried objects.
+                }
                 let intasectah = x_lockah.exposed_properties.physics.shape().intersects(y_lockah.exposed_properties.physics.shape());
                 if intasectah.0 {
+                    if x_lockah.exposed_properties.carrier_properties.will_carry(y_lockah.identify()) {
+                        drop(y_lockah); // drop the mutex lock so the x_lockah can do whatever it wants with it
+                        x_lockah.on_carry(self.objects[y].clone()).await;
+                        continue;
+                    }
+                    if y_lockah.exposed_properties.carrier_properties.will_carry(x_lockah.identify()) {
+                        drop(x_lockah); // drop the mutex lock so the x_lockah can do whatever it wants with it
+                        y_lockah.on_carry(self.objects[x].clone()).await;
+                        continue;
+                    }
                     let mut is_collide = false;
                     if x_lockah.get_does_collide(y_lockah.identify()) {
                         x_lockah.damage(y_lockah.get_collision_info().damage);
@@ -1038,6 +1055,9 @@ impl Client {
                                 },
                                 "a" => {
                                     server.place_antirtf_missile(x, y, 0.0, Some(self)).await;
+                                },
+                                "K" => {
+                                    server.place_carrier(x, y, 0.0, Some(self)).await;
                                 },
                                 &_ => {
                                     message.poison("INVALID PLACE TYPE");
