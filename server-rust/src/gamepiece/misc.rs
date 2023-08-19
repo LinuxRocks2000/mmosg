@@ -121,8 +121,8 @@ impl GamePiece for Bullet {
 
 impl GamePiece for Carrier {
     fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
-        thing.health_properties.max_health = 6.0;
-        thing.health_properties.passive_heal = 0.01;
+        thing.health_properties.max_health = 10.0;
+        thing.health_properties.passive_heal = 0.02;
         thing.collision_info.damage = 1.0;
         thing.physics.speed_cap = 3.0;
         thing.carrier_properties.space_remaining = 10;
