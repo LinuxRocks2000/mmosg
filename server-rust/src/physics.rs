@@ -150,8 +150,8 @@ impl BoxShape {
 
     pub fn bigger(&self, amount : f32) -> Self {
         Self {
-            x : self.x - amount/2.0,
-            y : self.y - amount/2.0, 
+            x : self.x,
+            y : self.y, 
             w : self.w + amount,
             h : self.h + amount,
             a : self.a
@@ -160,7 +160,7 @@ impl BoxShape {
 
     pub fn contains(&self, point : Vector2) -> bool {
         let cmp = point.rotate_about(Vector2::new(self.x, self.y), -self.a);
-        cmp.x > self.x && cmp.x < self.x + self.w && cmp.y > self.y && cmp.y < self.y + self.h
+        cmp.x > self.x - self.w/2.0 && cmp.x < self.x + self.w/2.0 && cmp.y > self.y - self.h/2.0 && cmp.y < self.y + self.h/2.0
     }
 }
 
