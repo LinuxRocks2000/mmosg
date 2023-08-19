@@ -1252,6 +1252,9 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                                         break 'cliloop;
                                     }
                                 }
+                                else {
+                                    break 'cliloop; // don't take no truck with poison frames no more
+                                }
                             }
                         }
                     },
