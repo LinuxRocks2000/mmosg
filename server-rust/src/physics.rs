@@ -116,9 +116,9 @@ impl BoxShape {
 
     fn from_corners(x1 : f32, y1 : f32, x2 : f32, y2 : f32) -> Self {
         Self {
-            x : (x1 + x2) / 2.0,
-            y : (y1 + y2) / 2.0,
-            w : x2 - x2,
+            x : x1,
+            y : y1,
+            w : x2 - x1,
             h : y2 - y1,
             a : 0.0
         }
@@ -126,10 +126,10 @@ impl BoxShape {
 
     pub fn ong_fr(&self) -> BoxShape { // create a high-quality bounding box of this BoxShape, but slower than worst()
         let points = self.points();
-        let mut lowest_x = self.x;
-        let mut lowest_y = self.y;
-        let mut highest_x = self.x;
-        let mut highest_y = self.y;
+        let mut lowest_x = self.x + self.w/2.0;
+        let mut lowest_y = self.y + self.h/2.0;
+        let mut highest_x = self.x - self.w/2.0;
+        let mut highest_y = self.y - self.h/2.0;
         for point in points {
             if point.x > highest_x {
                 highest_x = point.x;
@@ -149,8 +149,8 @@ impl BoxShape {
 
     pub fn bigger(&self, amount : f32) -> Self {
         Self {
-            x : self.x,
-            y : self.y, 
+            x : self.x - amount/2.0,
+            y : self.y - amount/2.0, 
             w : self.w + amount,
             h : self.h + amount,
             a : self.a
@@ -159,7 +159,7 @@ impl BoxShape {
 
     pub fn contains(&self, point : Vector2) -> bool {
         let cmp = point.rotate_about(Vector2::new(self.x, self.y), -self.a);
-        cmp.x > self.x - self.w/2.0 && cmp.x < self.x + self.w/2.0 && cmp.y > self.y - self.h/2.0 && cmp.y < self.y + self.h/2.0
+        cmp.x > self.x && cmp.x < self.x + self.w && cmp.y > self.y && cmp.y < self.y + self.h
     }
 }
 

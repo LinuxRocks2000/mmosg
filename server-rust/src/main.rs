@@ -135,7 +135,7 @@ impl Server {
     }
 
     fn object_field_check(&self, object : BoxShape, x : f32, y : f32) -> bool {
-        object.ong_fr().bigger(850.0).contains(Vector2::new(x, y)) // this ong frs it first because contains doesn't really work on rotated objects
+        object.ong_fr().bigger(800.0).contains(Vector2::new(x, y)) // this ong frs it first because contains doesn't really work on rotated objects
     }
 
     async fn is_inside_friendly(&self, x : f32, y : f32, banner : usize, tp : char) -> bool {
