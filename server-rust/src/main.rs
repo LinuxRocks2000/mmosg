@@ -174,6 +174,9 @@ impl Server {
                 },
                 ReqZone::AwayFromThings => {
                     self.is_clear(x, y).await
+                },
+                ReqZone::Both => {
+                    self.is_clear(x, y).await || self.is_inside_friendly(x, y, banner, 'c').await || self.is_inside_friendly(x, y, banner, 'F').await
                 }
             } {
                 sender.as_mut().unwrap().kys = true; // drop the client, something nefarious is going on

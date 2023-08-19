@@ -56,7 +56,8 @@ pub enum BulletType {
 pub enum ReqZone { // Placing zone.
     NoZone, // can place anywhere
     WithinCastleOrFort, // most common one: can only place inside your sphere of influence
-    AwayFromThings // castles and forts are this: cannot be placed near things
+    AwayFromThings, // castles and forts are this: cannot be placed near things
+    Both
 }
 
 
@@ -548,6 +549,10 @@ impl GamePiece for Castle {
 impl GamePiece for Fort {
     fn identify(&self) -> char {
         'F'
+    }
+
+    fn req_zone(&self) -> ReqZone {
+        ReqZone::Both
     }
 
     fn obtain_physics(&self) -> PhysicsObject {
