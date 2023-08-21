@@ -1004,7 +1004,7 @@ impl Client {
                                                 server.place_basic_fighter(x + 200.0, y, 0.0, Some(self)).await;
                                                 server.place_basic_fighter(x, y - 200.0, 0.0, Some(self)).await;
                                                 server.place_basic_fighter(x, y + 200.0, 0.0, Some(self)).await;
-                                                self.collect(1000).await;
+                                                self.collect(100).await;
                                             },
                                             ClientMode::RealTimeFighter => {
                                                 //server.place_basic_fighter(x - 100.0, y, PI, Some(self)).await;
