@@ -646,11 +646,14 @@ impl Server {
         self.objects.push(pc.clone());
     }
 
-    async fn authenticate(&self, password : String) -> AuthState {
+    async fn authenticate(&self, password : String, spectator : bool) -> AuthState {
+        if spectator {
+            return AuthState::Spectator
+        }
         if self.password == password || self.passwordless {
             return AuthState::Single;
         }
-        else if password == "" {
+        if password == "" {
             return AuthState::Spectator;
         }
         else {
@@ -915,7 +918,7 @@ impl Client {
     async fn handle(&mut self, message : ProtocolMessage, mut server : tokio::sync::MutexGuard<'_, Server>) {
         if message.command == 'c' && !self.is_authorized {
             if server.new_user_can_join() {
-                let lockah = server.authenticate(message.args[0].clone()).await;
+                let lockah = server.authenticate(message.args[0].clone(), message.args[2] == "spectator").await;
                 match lockah { // If you condense this, for === RUST REASONS === it keeps the mutex locked.
                     AuthState::Error => {
                         println!("New user has invalid password!");
