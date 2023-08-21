@@ -97,6 +97,7 @@ pub struct ExposedProperties { // everything a GamePieceBase wants to expose to 
     pub exploder           : Vec<ExplosionMode>,
     pub id                 : u32,
     pub goal_x             : f32,
+    pub value              : char,
     pub goal_y             : f32,
     pub goal_a             : f32,
     pub ttl                : i32, // ttl of < 0 means ttl does nothing. ttl of 0 means die. ttl of anything higher means subtract one every update.
@@ -173,7 +174,6 @@ pub struct CollisionInfo {
 pub struct GamePieceBase {
     banner                 : usize,
     pub exposed_properties : ExposedProperties,
-    value                  : char,
     piece                  : Box<dyn GamePiece + Send + Sync>,
     pub shoot_timer        : u32,
     broadcasts             : Vec<ProtocolMessage>,
@@ -192,8 +192,6 @@ impl GamePieceBase {
         physics.set_angle(a);
         let mut thing = Self {
             banner : 0,
-            value : piece.identify(),
-            piece,
             shoot_timer : 20,
             exposed_properties : ExposedProperties {
                 health_properties : HealthProperties {
@@ -209,6 +207,7 @@ impl GamePieceBase {
                     suppress : false,
                     bullet_type : BulletType::Bullet
                 },
+                value : piece.identify(),
                 collision_info : CollisionInfo {
                     damage : 1.0
                 },
@@ -234,6 +233,7 @@ impl GamePieceBase {
             },
             broadcasts : vec![],
             forts : vec![],
+            piece,
             upgrades : vec![]
         };
         thing.piece.construct(&mut thing.exposed_properties);
@@ -242,7 +242,7 @@ impl GamePieceBase {
     }
 
     pub fn identify(&self) -> char {
-        self.value
+        self.exposed_properties.value
     }
 
     pub fn is_editable(&self) -> bool {
@@ -389,6 +389,9 @@ impl GamePieceBase {
         }
         if self.exposed_properties.health_properties.health < self.exposed_properties.health_properties.max_health {
             self.exposed_properties.health_properties.health += self.exposed_properties.health_properties.passive_heal;
+        }
+        if self.exposed_properties.health_properties.health > self.exposed_properties.health_properties.max_health {
+            self.exposed_properties.health_properties.health = self.exposed_properties.health_properties.max_health;
         }
         if self.exposed_properties.shooter_properties.shoot {
             if self.exposed_properties.shooter_properties.suppress {

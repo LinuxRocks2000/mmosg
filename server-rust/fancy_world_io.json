@@ -93,5 +93,6 @@
         "min_players": 2,
         "max_players": 100,
         "timeout": 1000
-    }
+    },
+    "database": "fancy_world_io.db"
 }

@@ -40,7 +40,8 @@ struct ServerConfigFile {
     play_secs       : Option<f32>,
     headless        : Option<bool>,
     permit_npcs     : Option<bool>,
-    port            : Option<u16>
+    port            : Option<u16>,
+    database        : Option<String>
 }
 
 pub struct Config {
@@ -108,13 +109,19 @@ impl Config {
         match self.json.strat_secs {
             Some(time) => {
                 server.times.0 = time;
-            }
+            },
             _ => {}
         }
         match self.json.play_secs {
             Some(time) => {
                 server.times.1 = time;
-            }
+            },
+            _ => {}
+        }
+        match &self.json.database {
+            Some(database_fname) => {
+                server.sql = database_fname.clone();
+            },
             _ => {}
         }
     }

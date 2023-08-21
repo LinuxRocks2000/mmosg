@@ -112,7 +112,8 @@ pub struct Server {
     clients_connected : u32,
     is_headless       : bool,
     permit_npcs       : bool,
-    port              : u16
+    port              : u16,
+    sql               : String
 }
 
 enum AuthState {
@@ -926,6 +927,7 @@ impl Client {
                         self.send_singlet('s').await;
                         server.user_logged_in(self).await;
                         server.banner_add(Some(self), Arc::new(message.args[1].clone())).await;
+                        self.is_authorized = true;
                     },
                     AuthState::Team (team, tl) => {
                         println!("New user has authenticated as player in team {}", server.banners[server.teams[team].banner_id]);
@@ -938,6 +940,7 @@ impl Client {
                         server.user_logged_in(self).await;
                         server.banner_add(Some(self), Arc::new(message.args[1].clone())).await;
                         server.teams[team].members.push(self.banner);
+                        self.is_authorized = true;
                     },
                     AuthState::Spectator => {
                         println!("Spectator joined!");
@@ -945,7 +948,6 @@ impl Client {
                         server.spectator_joined(self).await;
                     }
                 }
-                self.is_authorized = true;
                 self.mode = match message.args[2].as_str() {
                     "normal" => ClientMode::Normal,
                     "defender" => ClientMode::Defense,
@@ -999,7 +1001,7 @@ impl Client {
                                                 server.place_basic_fighter(x + 200.0, y, 0.0, Some(self)).await;
                                                 server.place_basic_fighter(x, y - 200.0, 0.0, Some(self)).await;
                                                 server.place_basic_fighter(x, y + 200.0, 0.0, Some(self)).await;
-                                                self.collect(100).await;
+                                                self.collect(1000).await;
                                             },
                                             ClientMode::RealTimeFighter => {
                                                 //server.place_basic_fighter(x - 100.0, y, PI, Some(self)).await;
@@ -1450,7 +1452,8 @@ async fn main(){
         clients_connected   : 0,
         is_headless         : false,
         permit_npcs         : true,
-        port                : 0
+        port                : 0,
+        sql                 : "default.db".to_string()
     };
     //rx.close().await;
     server.load_config().await;
@@ -1463,6 +1466,9 @@ async fn main(){
     let commandset_clone = commandset.clone();
     tokio::task::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_millis((1000.0/FPS) as u64));
+        let connection = sqlite::open(server_mutex_loopah.lock().await.sql.clone()).unwrap();
+        let init_query = "CREATE TABLE IF NOT EXISTS anonymous_records (banner TEXT, highscore INTEGER, wins INTEGER, losses INTEGER);CREATE TABLE IF NOT EXISTS logins (banner TEXT, password TEXT, highscore INTEGER, wins INTEGER, losses INTEGER);CREATE TABLE IF NOT EXISTS teams_records (teamname TEXT, wins INTEGER, losses INTEGER);";
+        connection.execute(init_query).unwrap();
         loop {
             //use tokio::time::Instant;
             interval.tick().await;
@@ -1618,6 +1624,7 @@ pub mod tests {
     use crate::BoxShape;
     use crate::functions::*;
     use std::f32::consts::PI;
+    use crate::leaderboard;
     #[test]
     fn check_vector_creation() {
         let vec = Vector2::new_from_manda(1.0, 0.0);
@@ -1683,5 +1690,10 @@ pub mod tests {
         assert!(!shape.contains(Vector2::new(-8.0, 0.0)));
         shape.a = PI/8.0;
         assert!(shape.contains(Vector2::new(-4.0, 0.0)));
+    }
+
+    #[test]
+    fn leaderboard_read() {
+        leaderboard::read_leaderboard("fancy_world_io.leaderboard");
     }
 }

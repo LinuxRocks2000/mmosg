@@ -121,7 +121,7 @@ impl GamePiece for Bullet {
 
 impl GamePiece for Carrier {
     fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
-        thing.health_properties.max_health = 10.0;
+        thing.health_properties.max_health = 1.0;
         thing.health_properties.passive_heal = 0.02;
         thing.collision_info.damage = 1.0;
         thing.physics.speed_cap = 3.0;
@@ -158,8 +158,13 @@ impl GamePiece for Carrier {
         true
     }
 
-    fn on_carry(&mut self, _properties : &mut ExposedProperties, thing : &mut ExposedProperties) { // when a new object becomes carried by this
+    fn on_carry(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties) { // when a new object becomes carried by this
         thing.goal_x = -1.0;
+        if thing.value == 'h' {
+            me.physics.speed_cap += 1.0;
+        }
+        me.health_properties.max_health += thing.health_properties.max_health;
+        me.health_properties.health += thing.health_properties.max_health;
     }
 
     fn carry_iter(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties, berth : usize) -> bool {
@@ -184,6 +189,10 @@ impl GamePiece for Carrier {
         new_pos = new_pos.rotate_about(Vector2::new(me.physics.cx(), me.physics.cy()), me.physics.angle());
         thing.physics.set_cx(new_pos.x);
         thing.physics.set_cy(new_pos.y);
+        if thing.value == 'h' {
+            me.physics.speed_cap -= 1.0;
+        }
+        me.health_properties.max_health -= thing.health_properties.max_health;
     }
 }
 
