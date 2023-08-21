@@ -913,6 +913,7 @@ impl Client {
             args: vec!["Your poisoning attempts have FAILED. EAT DISCONNECT!".to_string()]
         }).await;
         self.kys = true;
+        println!("Retaliating");
     }
 
     async fn handle(&mut self, message : ProtocolMessage, mut server : tokio::sync::MutexGuard<'_, Server>) {
@@ -973,11 +974,7 @@ impl Client {
                         }
                         if server.mode != GameMode::Strategy && message.args[0] != "c"{ // if it is trying to place an object, but it isn't strat mode and it isn't placing a castle
                             message.poison("CLIENT IS ATTEMPTING TO PLACE AN OBJECT OUTSIDE OF STRATEGY MODE");
-                            self.retaliate_from_poison().await;
-                            self.send_protocol_message(ProtocolMessage {
-                                command: 'n',
-                                args: vec![message.args[0].clone(), "-1".to_string(), message.args[1].clone(), message.args[2].clone(), "10.0".to_string(), "1".to_string(), "-1".to_string(), "10".to_string(), "10".to_string()]
-                            }).await;
+                            // originally, this retaliated, but now it just refuses. the retaliation was a problem.
                             return; // can't place things if it ain't strategy. Also this is poison.
                         }
                         self.places_this_turn += 1;
