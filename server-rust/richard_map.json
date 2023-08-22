@@ -1,8 +1,8 @@
 { 
     "password": null,
     "world_size": 10000,
-    "io_mode": false,
-    "permit_npcs": false,
+    "io_mode": true,
+    "permit_npcs": true,
     "map": [
         {
             "x": 1375,
@@ -79,9 +79,9 @@
     ]
     ,
     "autonomous": {
-        "min_players": 2,
+        "min_players": 1,
         "max_players": 100,
         "timeout": 1000
     },
     "port": 3000
-} 
+}
