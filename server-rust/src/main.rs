@@ -1467,7 +1467,7 @@ async fn main(){
     tokio::task::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_millis((1000.0/FPS) as u64));
         let connection = sqlite::open(server_mutex_loopah.lock().await.sql.clone()).unwrap();
-        let init_query = "CREATE TABLE IF NOT EXISTS anonymous_records (banner TEXT, highscore INTEGER, wins INTEGER, losses INTEGER);CREATE TABLE IF NOT EXISTS logins (banner TEXT, password TEXT, highscore INTEGER, wins INTEGER, losses INTEGER);CREATE TABLE IF NOT EXISTS teams_records (teamname TEXT, wins INTEGER, losses INTEGER);";
+        let init_query = "CREATE TABLE IF NOT EXISTS logins (banner TEXT, password TEXT, highscore INTEGER, wins INTEGER, losses INTEGER);CREATE TABLE IF NOT EXISTS teams_records (teamname TEXT, wins INTEGER, losses INTEGER);";
         connection.execute(init_query).unwrap();
         loop {
             //use tokio::time::Instant;
