@@ -510,22 +510,28 @@ impl Server {
     }
 
     async fn mainloop(&mut self) {
-        if self.is_io && self.clients_connected == 0 {
-            self.clear_banners();
-        }
         if self.mode == GameMode::Waiting {
             if self.is_io {
                 self.start().await;
             }
             if self.autonomous.is_some() {
                 if self.living_players >= self.autonomous.unwrap().0 {
-                    self.autonomous.as_mut().unwrap().2 -= 1;
-                    self.broadcast(ProtocolMessage {
-                        command: '!',
-                        args: vec![self.autonomous.unwrap().2.to_string()]
-                    });
-                    if self.autonomous.unwrap().2 <= 0 {
-                        self.start().await;
+                    let mut is_has_moreteam = true;
+                    for team in &self.teams {
+                        if team.live_count == self.living_players { // If one team holds all the players
+                            is_has_moreteam = false;
+                            break;
+                        }
+                    }
+                    if is_has_moreteam {
+                        self.autonomous.as_mut().unwrap().2 -= 1;
+                        self.broadcast(ProtocolMessage {
+                            command: '!',
+                            args: vec![self.autonomous.unwrap().2.to_string()]
+                        });
+                        if self.autonomous.unwrap().2 <= 0 {
+                            self.start().await;
+                        }
                     }
                 }
             }
@@ -667,9 +673,9 @@ impl Server {
         return AuthState::Error;
     }
 
-    async fn banner_add(&mut self, mut dispatcha : Option<&mut Client>, banner : Arc<String>) -> usize {
-        if dispatcha.is_some() && banner == Arc::new("Puheen is a femboy".to_string()) {
-            dispatcha.as_mut().unwrap().kys = true;
+    async fn banner_add(&mut self, mut dispatcha : Option<&mut Client>, mut banner : Arc<String>) -> usize {
+        while self.banners.contains(&banner) {
+            banner = Arc::new(banner.to_string() + ".copy");
         }
         let bannah = self.banners.len();
         let mut args = vec![bannah.to_string(), banner.to_string()];
@@ -750,6 +756,7 @@ impl Server {
     }
 
     fn clear_banners(&mut self) {
+        println!("Clearing banners...");
         while self.banners.len() > 1 {
             self.banners.remove(1); // Leave the first one, which is the null banner
         }
@@ -1495,6 +1502,9 @@ async fn main(){
                 },
                 Ok (ServerCommand::Disconnect) => {
                     lawk.clients_connected -= 1;
+                    if lawk.clients_connected == 0 {
+                        lawk.clear_banners();
+                    }
                 },
                 Ok (ServerCommand::Connect) => {
                     lawk.clients_connected += 1;
