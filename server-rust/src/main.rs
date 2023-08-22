@@ -757,7 +757,7 @@ impl Server {
 
     fn clear_banners(&mut self) {
         println!("Clearing banners...");
-        while self.banners.len() > 1 {
+        while self.banners.len() > 1 + self.teams.len() { // each team has a banner, lulz
             self.banners.remove(1); // Leave the first one, which is the null banner
         }
     }
@@ -1179,7 +1179,7 @@ impl Client {
                             args
                         });
                     }*/
-                    server.chat(message.args[0].clone(), self.banner, 0,
+                    server.chat(message.args[0].clone(), self.banner, if self.is_team_leader { 3 } else { 0 },
                         if self.team.is_none() || message.args[1] == "broadcast" {
                             None
                         }
