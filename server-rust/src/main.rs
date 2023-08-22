@@ -1179,7 +1179,7 @@ impl Client {
                             args
                         });
                     }*/
-                    server.chat(message.args[0].clone(), self.banner, if self.is_team_leader { 3 } else { 0 },
+                    server.chat(message.args[0].clone(), self.banner, if self.is_team_leader { 1 } else { 0 },
                         if self.team.is_none() || message.args[1] == "broadcast" {
                             None
                         }
