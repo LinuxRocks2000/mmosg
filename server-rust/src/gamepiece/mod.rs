@@ -562,7 +562,7 @@ impl Fort {
 impl GamePiece for Castle {
     fn obtain_physics(&self) -> PhysicsObject {
         if self.is_rtf {
-            PhysicsObject::new(0.0, 0.0, 10.0, 60.0, 0.0)
+            PhysicsObject::new(0.0, 0.0, 18.0, 80.0, 0.0)
         }
         else{
             PhysicsObject::new(0.0, 0.0, 50.0, 50.0, 0.0)

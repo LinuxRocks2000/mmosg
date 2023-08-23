@@ -581,7 +581,9 @@ impl Server {
                     }
                 }
             }
-            self.send_physics_updates().await;
+            if self.mode == GameMode::Play {
+                self.send_physics_updates().await;
+            }
             self.broadcast_tx.send(ClientCommand::Tick (self.counter, (if self.mode == GameMode::Strategy { "1" } else { "0" }).to_string())).expect("Broadcast failed");
             if self.mode == GameMode::Play {
                 self.deal_with_objects().await;
