@@ -55,7 +55,8 @@ pub struct Client {
     commandah         : tokio::sync::mpsc::Sender<ServerCommand>,
     is_team_leader    : bool,
     places_this_turn  : u8,
-    kys               : bool
+    kys               : bool,
+    a2a               : u16
 }
 
 
@@ -82,7 +83,8 @@ enum ClientCommand { // Commands sent to clients
     Tick (u32, String),
     ScoreTo (usize, i32),
     CloseAll,
-    ChatRoom (String, usize, u8, Option<usize>) // message, sender, priority
+    ChatRoom (String, usize, u8, Option<usize>), // message, sender, priority
+    GrantA2A (usize)
 }
 
 
@@ -171,7 +173,7 @@ impl Server {
             if !match zone {
                 ReqZone::NoZone => true,
                 ReqZone::WithinCastleOrFort => {
-                    self.is_inside_friendly(x, y, banner, 'c').await || self.is_inside_friendly(x, y, banner, 'F').await
+                    self.is_inside_friendly(x, y, banner, 'c').await || self.is_inside_friendly(x, y, banner, 'F').await || self.is_inside_friendly(x, y, banner, 'R').await
                 },
                 ReqZone::AwayFromThings => {
                     self.is_clear(x, y).await
@@ -255,6 +257,10 @@ impl Server {
 
     async fn place_fort(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
         self.place(Box::new(Fort::new()), x, y, a, sender).await
+    }
+
+    async fn place_air2air(&mut self, x : f32, y : f32, a : f32, target : u32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
+        self.place(Box::new(Air2Air::new(target)), x, y, a, sender).await
     }
 
     async fn place_random_npc(&mut self) { // Drop a random npc
@@ -382,6 +388,9 @@ impl Server {
                                 killah.unwrap().lock().await.collect(amount).await;
                             }*/
                             self.broadcast_tx.send(ClientCommand::ScoreTo (y_lockah.get_banner(), x_lockah.capture() as i32)).expect("Broadcast failed");
+                            if x_lockah.does_grant_a2a() {
+                                self.broadcast_tx.send(ClientCommand::GrantA2A (y_lockah.get_banner())).expect("Broadcast failed part 2");
+                            }
                         }
                         is_collide = true;
                     }
@@ -394,6 +403,9 @@ impl Server {
                                 killah.unwrap().lock().await.collect(amount).await;
                             }*/
                             self.broadcast_tx.send(ClientCommand::ScoreTo (x_lockah.get_banner(), y_lockah.capture() as i32)).expect("Broadcast failed");
+                            if y_lockah.does_grant_a2a() {
+                                self.broadcast_tx.send(ClientCommand::GrantA2A (x_lockah.get_banner())).expect("Broadcast failed part 2");
+                            }
                         }
                         is_collide = true;
                     }
@@ -874,7 +886,8 @@ impl Client {
             commandah,
             is_team_leader: false,
             places_this_turn: 0,
-            kys: false
+            kys: false,
+            a2a: 0
         }
     }
 
@@ -1003,6 +1016,9 @@ impl Client {
                             }
                             match tp.as_str() {
                                 "c" => {
+                                    if server.mode != GameMode::Waiting && !server.is_io { // you can't place castles if it's waiting and not an io game
+                                        return; // can't place castles if it isn't in WAITING.
+                                    }
                                     if !self.has_placed {
                                         self.has_placed = true;
                                         server.costs = false;
@@ -1017,8 +1033,9 @@ impl Client {
                                                 self.collect(100).await;
                                             },
                                             ClientMode::RealTimeFighter => {
-                                                //server.place_basic_fighter(x - 100.0, y, PI, Some(self)).await;
-                                                //server.place_basic_fighter(x + 100.0, y, 0.0, Some(self)).await;
+                                                server.place_basic_fighter(x - 100.0, y, PI, Some(self)).await;
+                                                server.place_basic_fighter(x + 100.0, y, 0.0, Some(self)).await;
+                                                self.send_singlet('A').await;
                                             },
                                             ClientMode::Defense => {
                                                 server.place_basic_fighter(x - 200.0, y, PI, Some(self)).await;
@@ -1142,6 +1159,21 @@ impl Client {
                             lock.exposed_properties.goal_a = a;
                         }
                     }
+                },
+                'A' => { // AIR TO AIR!
+                    let clawn = self.m_castle.as_ref().unwrap().clone();
+                    let lock = clawn.lock().await;
+                    match message.args[0].parse::<u32>() {
+                        Ok(numbah) => {
+                            let pos = lock.exposed_properties.physics.vector_position() + Vector2::new_from_manda(50.0, lock.exposed_properties.physics.angle());
+                            server.place_air2air(pos.x, pos.y, lock.exposed_properties.physics.angle() - PI/2.0, numbah, Some(self)).await;
+                        },
+                        Err(_) => {
+                            message.poison("INVALID INTEGERS");
+                            self.retaliate_from_poison().await;
+                            return;
+                        }
+                    };
                 },
                 'R' => {
                     if server.mode == GameMode::Play && self.m_castle.is_some(){
@@ -1349,6 +1381,12 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                                 command: 'B',
                                 args: vec![content, sender.to_string(), priority.to_string()]
                             }).await;
+                        }
+                    },
+                    Ok (ClientCommand::GrantA2A (to)) => {
+                        if to == moi.banner && moi.mode == ClientMode::RealTimeFighter {
+                            moi.a2a += 1;
+                            moi.send_singlet('A').await;
                         }
                     },
                     //_ => {}

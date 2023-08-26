@@ -41,7 +41,8 @@ pub enum TargetingFilter {
 #[derive(PartialEq, Clone)]
 pub enum TargetingMode {
     None,
-    Nearest
+    Nearest,
+    Id (u32)
 }
 
 
@@ -163,6 +164,10 @@ pub trait GamePiece {
     fn drop_carry(&mut self, _properties : &mut ExposedProperties, _thing : &mut ExposedProperties, _index : usize) { // called to iterate over every carried object every update
         
     }
+
+    fn does_grant_a2a(&self) -> bool {
+        false
+    }
 }
 
 
@@ -253,6 +258,10 @@ impl GamePieceBase {
         self.exposed_properties.health_properties.health = 0.0;
     }
 
+    pub fn does_grant_a2a(&self) -> bool {
+        self.piece.does_grant_a2a()
+    }
+
     pub async fn target(&mut self, server : &mut Server) {
         let mut best : Option<Arc<Mutex<GamePieceBase>>> = None;
         let mut best_value : f32 = 0.0; // If best is None, this value is ignored, so it can be anything.
@@ -291,6 +300,14 @@ impl GamePieceBase {
                                 let dist = (object.exposed_properties.physics.vector_position() - self.exposed_properties.physics.vector_position()).magnitude();
                                 if (dist >= self.exposed_properties.targeting.range.0 && dist <= self.exposed_properties.targeting.range.1) || self.exposed_properties.targeting.range.1 == 0.0 {
                                     Some(dist)
+                                }
+                                else {
+                                    None
+                                }
+                            },
+                            TargetingMode::Id (id) => {
+                                if object.exposed_properties.id == id {
+                                    Some(0.0) // the id is always the best possibility
                                 }
                                 else {
                                     None

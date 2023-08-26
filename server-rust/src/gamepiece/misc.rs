@@ -10,6 +10,7 @@ use crate::vector::Vector2;
 use super::BulletType;
 use crate::functions::*;
 use crate::ExposedProperties;
+use crate::ReqZone;
 use std::f32::consts::PI;
 
 pub struct Bullet {}
@@ -28,6 +29,10 @@ pub struct Radiation {
 }
 pub struct Nuke {}
 pub struct Block {}
+pub struct Air2Air {
+    target : u32,
+    count  : u32
+}
 
 
 impl Bullet {
@@ -63,6 +68,15 @@ impl Wall {
 impl Chest {
     pub fn new() -> Self {
         Self {}
+    }
+}
+
+impl Air2Air {
+    pub fn new(tid : u32) -> Self {
+        Self {
+            target : tid,
+            count  : 15
+        }
     }
 }
 
@@ -201,7 +215,7 @@ impl GamePiece for AntiRTFBullet {
         thing.targeting.mode = TargetingMode::Nearest;
         thing.targeting.filter = TargetingFilter::RealTimeFighter;
         thing.targeting.range = (0.0, 5000.0); // losing these guys is possible, but not easy
-        thing.health_properties.max_health = 2.0;
+        thing.health_properties.max_health = 1.0;
         thing.collision_info.damage = 5.0;
     }
 
@@ -229,12 +243,66 @@ impl GamePiece for AntiRTFBullet {
                     properties.physics.velocity = properties.physics.velocity * 0.9;
                 }
             },
-            None => {}
+            None => {
+                properties.physics.velocity = properties.physics.velocity * 0.8;
+            }
         }
     }
 
     fn cost(&self) -> u32 {
         7
+    }
+}
+
+impl GamePiece for Air2Air {
+    fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
+        thing.targeting.mode = TargetingMode::Id (self.target);
+        thing.targeting.filter = TargetingFilter::Any;
+        thing.targeting.range = (0.0, 5000.0); // losing these guys is possible, but not easy
+        thing.health_properties.max_health = 1.0;
+        thing.collision_info.damage = 5.0;
+    }
+
+    fn obtain_physics(&self) -> PhysicsObject {
+        PhysicsObject::new(0.0, 0.0, 30.0, 10.0, 0.0)
+    }
+
+    fn identify(&self) -> char {
+        'a'
+    }
+    
+    fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {
+        match properties.targeting.vector_to {
+            Some(vector_to) => {
+                let goalangle = vector_to.angle();
+                properties.physics.change_angle(loopize(goalangle, properties.physics.angle()) * 0.2);
+                if vector_to.magnitude() > 700.0 {
+                    properties.physics.thrust(2.0); // go way faster if it's far away
+                }
+                else {
+                    properties.physics.velocity = properties.physics.velocity * 0.99; // add a lil' friction so it can decelerate after going super fast cross-board
+                    properties.physics.thrust(1.0); // but also keep some thrust so the angle correction isn't moot
+                }
+                if (properties.physics.velocity.angle() - goalangle).abs() > PI/3.0 {
+                    properties.physics.velocity = properties.physics.velocity * 0.9;
+                }
+            },
+            None => {
+                properties.physics.velocity = properties.physics.velocity * 0.8;
+            }
+        }
+        if self.count > 0 {
+            self.count -= 1;
+            properties.physics.velocity = properties.physics.velocity * 0.3;
+        }
+    }
+
+    fn cost(&self) -> u32 {
+        0
+    }
+
+    fn req_zone(&self) -> ReqZone {
+        ReqZone::NoZone
     }
 }
 
@@ -254,6 +322,10 @@ impl GamePiece for Wall {
 
     fn obtain_physics(&self) -> PhysicsObject {
         PhysicsObject::new(0.0, 0.0, 30.0, 30.0, 0.0)
+    }
+
+    fn does_grant_a2a(&self) -> bool {
+        true
     }
 }
 
