@@ -632,8 +632,8 @@ impl Server {
 
     async fn start(&mut self) {
         if self.mode == GameMode::Waiting {
-            for _ in 0..(((self.gamesize * self.gamesize) / 1000000.0) as u32) { // One per 1,000,000 square pixels
-                self.place_random_rubble().await; // THIS FUNCTION IS AT FAULT!!!!!!!!!!!!!! THE PROBLEM IS HERE!!!!!!!!!!!!! ##########################
+            for _ in 0..std::cmp::min(((self.gamesize * self.gamesize) / 1000000.0) as u32, 200) { // One per 1,000,000 square pixels, or 200, whichever is lower.
+                self.place_random_rubble().await;
             }
             self.set_mode(GameMode::Strategy);
             println!("Game start.");
@@ -1161,6 +1161,9 @@ impl Client {
                     }
                 },
                 'A' => { // AIR TO AIR!
+                    if self.a2a == 0 {
+                        self.kys = true;
+                    }
                     let clawn = self.m_castle.as_ref().unwrap().clone();
                     let lock = clawn.lock().await;
                     match message.args[0].parse::<u32>() {

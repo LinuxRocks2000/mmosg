@@ -41,7 +41,8 @@ struct ServerConfigFile {
     headless        : Option<bool>,
     permit_npcs     : Option<bool>,
     port            : Option<u16>,
-    database        : Option<String>
+    database        : Option<String>,
+    map_anchor      : Option<String>
 }
 
 pub struct Config {
@@ -88,11 +89,23 @@ impl Config {
                 server.new_team(team.name.clone(), team.password.clone()).await;
             }
         }
+        let is_tl = match &self.json.map_anchor {
+            Some (anchor) => anchor == "topleft",
+            None => false
+        };
+        use crate::Vector2;
         for def in &self.json.map {
-            server.place_block(def.x, def.y, match def.a {
-                Some(a) => a,
+            let mut x = def.x;
+            let mut y = def.y;
+            let a = match def.a {
+                Some(a) => a * std::f32::consts::PI/180.0,
                 None => 0.0
-            }, def.w, def.h).await;
+            };
+            if is_tl {
+                x += def.w/2.0; // at this point in existence, it isn't rotated - after we've converted to cx,cy, it'll be rotated by the place_block call.
+                y += def.h/2.0;
+            }
+            server.place_block(x, y, a, def.w, def.h).await;
         }
         if self.json.io_mode.is_some() {
             server.is_io = self.json.io_mode.unwrap();
