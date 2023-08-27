@@ -28,6 +28,7 @@ use crate::gamepiece::npc;
 use crate::physics::BoxShape;
 use crate::config::Config;
 use futures::future::FutureExt; // for `.fuse()`
+use std::collections::HashMap;
 use tokio::select;
 use crate::gamepiece::BulletType;
 
@@ -115,7 +116,8 @@ pub struct Server {
     is_headless       : bool,
     permit_npcs       : bool,
     port              : u16,
-    sql               : String
+    sql               : String,
+    upg_costs         : HashMap<String, i32>
 }
 
 enum AuthState {
@@ -1165,19 +1167,36 @@ impl Client {
                     if self.a2a == 0 {
                         self.kys = true;
                     }
-                    let clawn = self.m_castle.as_ref().unwrap().clone();
-                    let lock = clawn.lock().await;
-                    match message.args[0].parse::<u32>() {
-                        Ok(numbah) => {
-                            let pos = lock.exposed_properties.physics.vector_position() + Vector2::new_from_manda(50.0, lock.exposed_properties.physics.angle());
-                            server.place_air2air(pos.x, pos.y, lock.exposed_properties.physics.angle() - PI/2.0, numbah, Some(self)).await;
-                        },
-                        Err(_) => {
-                            message.poison("INVALID INTEGERS");
-                            self.retaliate_from_poison().await;
-                            return;
-                        }
-                    };
+                    if self.m_castle.is_some() {
+                        match message.args[0].parse::<u32>() {
+                            Ok(numbah) => {
+                                let mut obj_vec = None;
+                                for obj in &server.objects {
+                                    let objlock = obj.lock().await;
+                                    if objlock.get_id() == numbah {
+                                        obj_vec = Some(objlock.exposed_properties.physics.vector_position());
+                                    }
+                                }
+                                match obj_vec {
+                                    None => {},
+                                    Some (vec) => {
+                                        let clawn = self.m_castle.as_ref().unwrap().clone();
+                                        let lock = clawn.lock().await;
+                                        if (lock.exposed_properties.physics.vector_position() - vec).magnitude() < 700.0 {
+                                            self.a2a -= 1;
+                                            let pos = lock.exposed_properties.physics.vector_position() + Vector2::new_from_manda(50.0, lock.exposed_properties.physics.angle());
+                                            server.place_air2air(pos.x, pos.y, lock.exposed_properties.physics.angle() - PI/2.0, numbah, Some(self)).await;
+                                        }
+                                    }
+                                }
+                            },
+                            Err(_) => {
+                                message.poison("INVALID INTEGERS");
+                                self.retaliate_from_poison().await;
+                                return;
+                            }
+                        };
+                    }
                 },
                 'R' => {
                     if server.mode == GameMode::Play && self.m_castle.is_some(){
@@ -1245,17 +1264,24 @@ impl Client {
                     };
                     println!("Upgrading id {} to {}", id, message.args[1]);
                     let upg = message.args[1].clone();
-                    for object in &server.objects {
-                        let mut lawk = object.lock().await;
-                        if lawk.get_id() == id {
-                            lawk.upgrade(upg);
-                            break;
+                    let price = *server.upg_costs.entry(message.args[1].clone()).or_insert(0);
+                    if self.score >= price {
+                        self.collect(-price).await;
+                        for object in &server.objects {
+                            let mut lawk = object.lock().await;
+                            if lawk.get_id() == id {
+                                lawk.upgrade(upg);
+                                break;
+                            }
                         }
+                        server.broadcast(ProtocolMessage {
+                            command: 'u',
+                            args: vec![id.to_string(), message.args[1].clone()]
+                        });
                     }
-                    server.broadcast(ProtocolMessage {
-                        command: 'u',
-                        args: vec![id.to_string(), message.args[1].clone()]
-                    });
+                    else { // something nefarious is going on!
+                        self.kys = true;
+                    }
                 }
                 _ => {
                     message.poison("INAPPROPRIATE COMMAND");
@@ -1508,7 +1534,13 @@ async fn main(){
         is_headless         : false,
         permit_npcs         : true,
         port                : 0,
-        sql                 : "default.db".to_string()
+        sql                 : "default.db".to_string(),
+        upg_costs           : HashMap::from([
+            ("b".to_string(), 30),
+            ("f".to_string(), 70),
+            ("h".to_string(), 150),
+            ("s".to_string(), 40),
+        ])
     };
     //rx.close().await;
     server.load_config().await;
