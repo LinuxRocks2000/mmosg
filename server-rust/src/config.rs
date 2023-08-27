@@ -93,7 +93,6 @@ impl Config {
             Some (anchor) => anchor == "topleft",
             None => false
         };
-        use crate::Vector2;
         for def in &self.json.map {
             let mut x = def.x;
             let mut y = def.y;

@@ -261,6 +261,7 @@ impl GamePiece for Air2Air {
         thing.targeting.range = (0.0, 5000.0); // losing these guys is possible, but not easy
         thing.health_properties.max_health = 1.0;
         thing.collision_info.damage = 5.0;
+        thing.ttl = 300;
     }
 
     fn obtain_physics(&self) -> PhysicsObject {
