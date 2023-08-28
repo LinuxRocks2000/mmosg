@@ -60,7 +60,7 @@ impl Config {
         }
     }
 
-    pub async fn load_into(&self, server : &mut Server) {
+    pub fn load_into(&self, server : &mut Server) {
         server.gamesize = self.json.world_size;
         server.port = match self.json.port {
             Some(port) => port,
@@ -86,7 +86,7 @@ impl Config {
         if self.json.teams.is_some() {
             server.passwordless = false;
             for team in self.json.teams.as_ref().unwrap() {
-                server.new_team(team.name.clone(), team.password.clone()).await;
+                server.new_team(team.name.clone(), team.password.clone());
             }
         }
         let is_tl = match &self.json.map_anchor {
@@ -104,7 +104,7 @@ impl Config {
                 x += def.w/2.0; // at this point in existence, it isn't rotated - after we've converted to cx,cy, it'll be rotated by the place_block call.
                 y += def.h/2.0;
             }
-            server.place_block(x, y, a, def.w, def.h).await;
+            server.place_block(x, y, a, def.w, def.h);
         }
         if self.json.io_mode.is_some() {
             server.is_io = self.json.io_mode.unwrap();

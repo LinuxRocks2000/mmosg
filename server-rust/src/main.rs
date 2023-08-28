@@ -7,7 +7,6 @@
 pub mod vector;
 pub mod physics;
 pub mod gamepiece;
-pub mod prng;
 pub mod config;
 pub mod functions;
 use crate::vector::Vector2;
@@ -21,7 +20,6 @@ use crate::gamepiece::*;
 use std::fmt;
 use std::f32::consts::PI;
 use rand::Rng;
-use prng::Mulberry32;
 use crate::gamepiece::fighters::*;
 use crate::gamepiece::misc::*;
 use crate::gamepiece::npc;
@@ -50,7 +48,7 @@ pub struct Client {
     score             : i32,
     has_placed        : bool,
     banner            : usize,
-    m_castle          : Option<Arc<Mutex<GamePieceBase>>>,
+    m_castle          : Option<u32>,
     mode              : ClientMode,
     team              : Option<usize>,
     commandah         : tokio::sync::mpsc::Sender<ServerCommand>,
@@ -85,14 +83,15 @@ enum ClientCommand { // Commands sent to clients
     ScoreTo (usize, i32),
     CloseAll,
     ChatRoom (String, usize, u8, Option<usize>), // message, sender, priority
-    GrantA2A (usize)
+    GrantA2A (usize),
+    AttachToBanner (u32, usize)
 }
 
 
 pub struct Server {
     mode              : GameMode,
     password          : String,
-    objects           : Vec<Arc<Mutex<GamePieceBase>>>,
+    objects           : Vec<GamePieceBase>,
     teams             : Vec<TeamData>,
     banners           : Vec<Arc<String>>,
     gamesize          : f32,
@@ -101,7 +100,6 @@ pub struct Server {
     top_id            : u32,
     counter           : u32,
     costs             : bool, // Whether or not to cost money when placing a piece
-    random            : Arc<Mutex<Mulberry32>>,
     place_timer       : u32,
     autonomous        : Option<(u32, u32, u32, u32)>,
     is_io             : bool, // IO mode gets rid of the winner system (game never ends) and allows people to join at any time.
@@ -143,12 +141,11 @@ impl Server {
         object.ong_fr().bigger(800.0).contains(Vector2::new(x, y)) // this ong frs it first because contains doesn't really work on rotated objects
     }
 
-    async fn is_inside_friendly(&self, x : f32, y : f32, banner : usize, tp : char) -> bool {
+    fn is_inside_friendly(&self, x : f32, y : f32, banner : usize, tp : char) -> bool {
         for obj in &self.objects {
-            let lock = obj.lock().await;
-            if lock.identify() == tp {
-                if lock.get_banner() == banner {
-                    if self.object_field_check(lock.exposed_properties.physics.shape, x, y) {
+            if obj.identify() == tp {
+                if obj.get_banner() == banner {
+                    if self.object_field_check(obj.exposed_properties.physics.shape, x, y) {
                         return true; // short circuit
                     }
                 }
@@ -157,17 +154,16 @@ impl Server {
         return false;
     }
 
-    async fn is_clear(&self, x : f32, y : f32) -> bool {
+    fn is_clear(&self, x : f32, y : f32) -> bool {
         for obj in &self.objects {
-            let lock = obj.lock().await;
-            if self.object_field_check(lock.exposed_properties.physics.shape, x, y) {
+            if self.object_field_check(obj.exposed_properties.physics.shape, x, y) {
                 return false; // short circuit
             }
         }
         return true;
     }
 
-    async fn place(&mut self, piece : Box<dyn GamePiece + Send + Sync>, x : f32, y : f32, a : f32, mut sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
+    fn place(&mut self, piece : Box<dyn GamePiece + Send + Sync>, x : f32, y : f32, a : f32, mut sender : Option<&mut Client>) -> u32 { // return the id of the object released
         let zone = piece.req_zone();
         let la_thang = GamePieceBase::new(piece, x, y, a);
         if sender.is_some() {
@@ -175,105 +171,110 @@ impl Server {
             if !match zone {
                 ReqZone::NoZone => true,
                 ReqZone::WithinCastleOrFort => {
-                    self.is_inside_friendly(x, y, banner, 'c').await || self.is_inside_friendly(x, y, banner, 'F').await || self.is_inside_friendly(x, y, banner, 'R').await
+                    self.is_inside_friendly(x, y, banner, 'c') || self.is_inside_friendly(x, y, banner, 'F') || self.is_inside_friendly(x, y, banner, 'R')
                 },
                 ReqZone::AwayFromThings => {
-                    self.is_clear(x, y).await
+                    self.is_clear(x, y)
                 },
                 ReqZone::Both => {
-                    self.is_clear(x, y).await || self.is_inside_friendly(x, y, banner, 'c').await || self.is_inside_friendly(x, y, banner, 'F').await
+                    self.is_clear(x, y) || self.is_inside_friendly(x, y, banner, 'c') || self.is_inside_friendly(x, y, banner, 'F')
                 }
             } {
                 sender.as_mut().unwrap().kys = true; // drop the client, something nefarious is going on
-                return Arc::new(Mutex::new(la_thang)); // refuse to place, returning a doomed object. This is a nasty trick for people who evade the place restrictions because they'll find themselves with $100 in the bank - and no castle to their name!
+                return 0; // refuse to place, returning nothing.
             }
             if self.costs {
                 let cost = la_thang.cost() as i32;
                 if cost > sender.as_ref().unwrap().score {
-                    return Arc::new(Mutex::new(la_thang));
+                    return 0;
                 }
-                sender.as_mut().unwrap().collect(-cost).await;
+                self.broadcast_tx.send(ClientCommand::ScoreTo (banner, -cost)).expect("BROADCAST FAILED");
             }
         }
-        let ret = Arc::new(Mutex::new(la_thang));
-        self.add(ret.clone(), sender).await;
-        ret
+        self.add(la_thang, sender)
     }
 
-    async fn place_wall(&mut self, x : f32, y : f32, sender : Option<&mut Client>) {
-        self.place(Box::new(Wall::new()), x, y, 0.0, sender).await;
+    fn obj_lookup(&self, id : u32) -> Option<usize> { // GIVEN the ID of an OBJECT, return the INDEX or NONE if it DOES NOT EXIST.
+        for i in 0..self.objects.len() {
+            if self.objects[i].get_id() == id {
+                return Some(i);
+            }
+        }
+        return None;
     }
 
-    async fn place_castle(&mut self, x : f32, y : f32, is_rtf : bool, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(Castle::new(is_rtf)), x, y, 0.0, sender).await
+    fn place_wall(&mut self, x : f32, y : f32, sender : Option<&mut Client>) {
+        self.place(Box::new(Wall::new()), x, y, 0.0, sender);
     }
 
-    async fn place_basic_fighter(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(BasicFighter::new()), x, y, a, sender).await
+    fn place_castle(&mut self, x : f32, y : f32, is_rtf : bool, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(Castle::new(is_rtf)), x, y, 0.0, sender)
     }
 
-    async fn place_block(&mut self, x : f32, y : f32, a : f32, w : f32, h : f32) { // No sender; blocks can't be placed by clients.
-        let thing = self.place(Box::new(Block::new()), x, y, a, None).await;
-        let mut lock = thing.lock().await;
-        lock.exposed_properties.physics.shape.w = w;
-        lock.exposed_properties.physics.shape.h = h;
-        lock.exposed_properties.physics.set_cx(x);
-        lock.exposed_properties.physics.set_cy(y);
+    fn place_basic_fighter(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(BasicFighter::new()), x, y, a, sender)
     }
 
-    async fn place_tie_fighter(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(TieFighter::new()), x, y, a, sender).await
+    fn place_block(&mut self, x : f32, y : f32, a : f32, w : f32, h : f32) { // No sender; blocks can't be placed by clients.
+        let id = self.place(Box::new(Block::new()), x, y, a, None);
+        let i = self.obj_lookup(id).expect("SOMETHING WENT TERRIBLY WRONG"); // in this case the object is guaranteed to exist by the time the lookup is performed, so unwrapping directly is safe.
+        self.objects[i].exposed_properties.physics.shape.w = w; // TODO: make this nicer
+        self.objects[i].exposed_properties.physics.shape.h = h;
+        self.objects[i].exposed_properties.physics.set_cx(x);
+        self.objects[i].exposed_properties.physics.set_cy(y);
     }
 
-    async fn place_sniper(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(Sniper::new()), x, y, a, sender).await
+    fn place_tie_fighter(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(TieFighter::new()), x, y, a, sender)
     }
 
-    async fn place_missile(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(Missile::new()), x, y, a, sender).await
+    fn place_sniper(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(Sniper::new()), x, y, a, sender)
     }
 
-    async fn place_turret(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(Turret::new()), x, y, a, sender).await
+    fn place_missile(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(Missile::new()), x, y, a, sender)
     }
 
-    async fn place_mls(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(MissileLaunchingSystem::new()), x, y, a, sender).await
+    fn place_turret(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(Turret::new()), x, y, a, sender)
     }
 
-    async fn place_antirtf_missile(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(AntiRTFBullet::new()), x, y, a, sender).await
+    fn place_mls(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(MissileLaunchingSystem::new()), x, y, a, sender)
     }
 
-    async fn place_carrier(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(Carrier::new()), x, y, a, sender).await
+    fn place_antirtf_missile(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(AntiRTFBullet::new()), x, y, a, sender)
     }
 
-    async fn place_radiation(&mut self, x : f32, y : f32, size : f32, halflife : f32, strength : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(Radiation::new(halflife, strength, size, size)), x, y, a, sender).await
+    fn place_carrier(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(Carrier::new()), x, y, a, sender)
     }
 
-    async fn place_nuke(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(Nuke::new()), x, y, a, sender).await
+    fn place_radiation(&mut self, x : f32, y : f32, size : f32, halflife : f32, strength : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(Radiation::new(halflife, strength, size, size)), x, y, a, sender)
     }
 
-    async fn place_fort(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(Fort::new()), x, y, a, sender).await
+    fn place_nuke(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(Nuke::new()), x, y, a, sender)
     }
 
-    async fn place_air2air(&mut self, x : f32, y : f32, a : f32, target : u32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
-        self.place(Box::new(Air2Air::new(target)), x, y, a, sender).await
+    fn place_fort(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(Fort::new()), x, y, a, sender)
     }
 
-    async fn place_random_npc(&mut self) { // Drop a random npc
+    fn place_air2air(&mut self, x : f32, y : f32, a : f32, target : u32, sender : Option<&mut Client>) -> u32 {
+        self.place(Box::new(Air2Air::new(target)), x, y, a, sender)
+    }
+
+    fn place_random_npc(&mut self) { // Drop a random npc
         if self.living_players == 0 || self.isnt_rtf > 0 { // All RTF games will spawn NPCs
             return;
         }
-        let mut randlock = self.random.lock().await;
-        let x = randlock.next() as f32 % self.gamesize;
-        let y = randlock.next() as f32 % self.gamesize;
-        let chance = randlock.next() % 6;
-        drop(randlock);
+        let x = rand::random::<f32>() % self.gamesize;
+        let y = rand::random::<f32>() % self.gamesize;
+        let chance = rand::random::<u8>() % 6;
         let thing : Box<dyn GamePiece + Send + Sync> = match chance {
             0 | 1 => {
                 Box::new(npc::Red::new())
@@ -292,24 +293,21 @@ impl Server {
                 return;
             }
         };
-        for object in &self.objects { // This part is fine
-            let lelock = object.lock().await;
-            if lelock.identify() == 'c' || lelock.identify() == 'R' {
-                if (lelock.exposed_properties.physics.cx() - x).abs() < 400.0 && (lelock.exposed_properties.physics.cy() - y).abs() < 400.0 {
+        for object in &self.objects {
+            if object.identify() == 'c' || object.identify() == 'R' {
+                if (object.exposed_properties.physics.cx() - x).abs() < 400.0 && (object.exposed_properties.physics.cy() - y).abs() < 400.0 {
                     println!("Berakx");
                     return;
                 }
             }
         }
-        self.place(thing, x, y, 0.0, None).await;
+        self.place(thing, x, y, 0.0, None);
     }
 
-    async fn place_random_rubble(&mut self) { // Drop a random chest or wall (or something else, if I add other things)
-        let mut randlock = self.random.lock().await;
-        let x = randlock.next() as f32 % self.gamesize;
-        let y = randlock.next() as f32 % self.gamesize;
-        let chance = randlock.next() % 100;
-        drop(randlock);
+    fn place_random_rubble(&mut self) { // Drop a random chest or wall (or something else, if I add other things)
+        let x = rand::random::<f32>() % self.gamesize;
+        let y = rand::random::<f32>() % self.gamesize;
+        let chance = rand::random::<u8>() % 100;
         let thing : Box<dyn GamePiece + Send + Sync> = {
             if chance < 50 {
                 Box::new(Chest::new())
@@ -318,43 +316,46 @@ impl Server {
                 Box::new(Wall::new())
             }
         };
-        for object in &self.objects { // This part is fine
-            let lelock = object.lock().await;
-            if lelock.identify() == 'c' || lelock.identify() == 'R' {
-                if (lelock.exposed_properties.physics.cx() - x).abs() < 400.0 && (lelock.exposed_properties.physics.cy() - y).abs() < 400.0 {
+        for object in &self.objects {
+            if object.identify() == 'c' || object.identify() == 'R' {
+                if (object.exposed_properties.physics.cx() - x).abs() < 400.0 && (object.exposed_properties.physics.cy() - y).abs() < 400.0 {
                     println!("Berakx");
                     return;
                 }
             }
         }
-        self.place(thing, x, y, 0.0, None).await;
+        self.place(thing, x, y, 0.0, None);
         if self.permit_npcs {
-            self.place_random_npc().await;
+            self.place_random_npc();
         }
     }
 
-    pub async fn shoot(&mut self, bullet_type : BulletType, position : Vector2, velocity : Vector2, range : i32, sender : Option<&mut Client>) -> Arc<Mutex<GamePieceBase>> {
+    pub fn shoot(&mut self, bullet_type : BulletType, position : Vector2, velocity : Vector2, range : i32, sender : Option<&mut Client>) -> u32 {
         let bullet = self.place(match bullet_type {
             BulletType::Bullet => Box::new(Bullet::new()),
             BulletType::AntiRTF => Box::new(AntiRTFBullet::new())
-        }, position.x, position.y, velocity.angle(), sender).await;
-        let mut lock = bullet.lock().await;
-        lock.exposed_properties.physics.velocity = velocity;
-        lock.exposed_properties.ttl = range;
-        drop(lock);
+        }, position.x, position.y, velocity.angle(), sender);
+        let i = self.obj_lookup(bullet).unwrap(); // it can be safely unwrapped because the object is guaranteed to exist at this point
+        self.objects[i].exposed_properties.physics.velocity = velocity; // TODO: make this nicer
+        self.objects[i].exposed_properties.ttl = range;
         bullet
     }
 
-    /*async fn get_client_by_banner(&self, banner : usize) -> Option<Arc<Mutex<Client>>> {
-        for client in &self.clients {
-            if client.lock().await.banner == banner {
-                return Some(client.clone());
-            }
-        }
-        None
-    }*/
+    fn carry_tasks(&mut self, carrier : usize, carried : usize) { // expects that you've already done the lookups - this is the result of a very effective premature optimization in the physics engine
+        let carry_id = self.objects[carried].get_id();
+        self.objects[carrier].exposed_properties.carrier_properties.carrying.push(carry_id);
+        self.objects[carrier].exposed_properties.carrier_properties.space_remaining -= 1;
+        self.objects[carried].exposed_properties.carrier_properties.is_carried = true;
+        let mut carrier_props = self.objects[carrier].exposed_properties.clone();
+        let mut carried_props = self.objects[carried].exposed_properties.clone();
+        self.objects[carrier].piece.on_carry(&mut carrier_props, &mut carried_props);
+        self.objects[carrier].exposed_properties = carrier_props;
+        self.objects[carried].exposed_properties = carried_props;
+        // NOTE: If this doesn't work because of the borrow checker mad at having 2 (3???) mutable references to self.objects, just use copying on the ExposedProperties!
+        // Since carrying is a relatively rare operation, the wastefulness is not significant.
+    }
 
-    async fn deal_with_objects(&mut self) {
+    fn deal_with_objects(&mut self) {
         if self.objects.len() == 0 {
             return;
         }
@@ -363,101 +364,99 @@ impl Server {
                 if x == y {
                     println!("HANGING BECAUSE X EQUALS Y! CHECK YOUR MATH!");
                 }
-                let mut x_lockah = self.objects[x].lock().await; // Because of the phase shift these should never be the same item.
-                let mut y_lockah = self.objects[y].lock().await;
-                if x_lockah.exposed_properties.carrier_properties.is_carried || y_lockah.exposed_properties.carrier_properties.is_carried {
+                if self.objects[x].exposed_properties.carrier_properties.is_carried || self.objects[y].exposed_properties.carrier_properties.is_carried {
                     continue; // Never do any kind of collisions on carried objects.
                 }
-                let intasectah = x_lockah.exposed_properties.physics.shape().intersects(y_lockah.exposed_properties.physics.shape());
+                let intasectah = self.objects[x].exposed_properties.physics.shape().intersects(self.objects[y].exposed_properties.physics.shape());
                 if intasectah.0 {
-                    if x_lockah.exposed_properties.carrier_properties.will_carry(y_lockah.identify()) {
-                        drop(y_lockah); // drop the mutex lock so the x_lockah can do whatever it wants with it
-                        x_lockah.on_carry(self.objects[y].clone()).await;
+                    if self.objects[x].exposed_properties.carrier_properties.will_carry(self.objects[y].identify()) {
+                        self.carry_tasks(x, y);
                         continue;
                     }
-                    if y_lockah.exposed_properties.carrier_properties.will_carry(x_lockah.identify()) {
-                        drop(x_lockah); // drop the mutex lock so the x_lockah can do whatever it wants with it
-                        y_lockah.on_carry(self.objects[x].clone()).await;
+                    if self.objects[y].exposed_properties.carrier_properties.will_carry(self.objects[x].identify()) {
+                        self.carry_tasks(y, x);
                         continue;
                     }
                     let mut is_collide = false;
-                    if x_lockah.get_does_collide(y_lockah.identify()) {
-                        x_lockah.damage(y_lockah.get_collision_info().damage);
-                        if x_lockah.dead() && (y_lockah.get_banner() != x_lockah.get_banner()) {
-                            /*let killah = self.get_client_by_banner(y_lockah.get_banner()).await;
+                    if self.objects[x].get_does_collide(self.objects[y].identify()) {
+                        let dmg = self.objects[y].get_collision_info().damage;
+                        self.objects[x].damage(dmg);
+                        if self.objects[x].dead() && (self.objects[y].get_banner() != self.objects[x].get_banner()) {
+                            /*let killah = self.get_client_by_banner(self.objects[y].get_banner()).await;
                             if killah.is_some() {
-                                let amount = x_lockah.capture().await as i32;
+                                let amount = self.objects[x].capture().await as i32;
                                 killah.unwrap().lock().await.collect(amount).await;
                             }*/
-                            self.broadcast_tx.send(ClientCommand::ScoreTo (y_lockah.get_banner(), x_lockah.capture() as i32)).expect("Broadcast failed");
-                            if x_lockah.does_grant_a2a() {
-                                self.broadcast_tx.send(ClientCommand::GrantA2A (y_lockah.get_banner())).expect("Broadcast failed part 2");
+                            self.broadcast_tx.send(ClientCommand::ScoreTo (self.objects[y].get_banner(), self.objects[x].capture() as i32)).expect("Broadcast failed");
+                            if self.objects[x].does_grant_a2a() {
+                                self.broadcast_tx.send(ClientCommand::GrantA2A (self.objects[y].get_banner())).expect("Broadcast failed part 2");
                             }
                         }
                         is_collide = true;
                     }
-                    if y_lockah.get_does_collide(x_lockah.identify()) {
-                        y_lockah.damage(x_lockah.get_collision_info().damage);
-                        if y_lockah.dead() && (y_lockah.get_banner() != x_lockah.get_banner()) {
-                            /*let killah = self.get_client_by_banner(x_lockah.get_banner()).await;
+                    if self.objects[y].get_does_collide(self.objects[x].identify()) {
+                        let dmg = self.objects[x].get_collision_info().damage;
+                        self.objects[y].damage(dmg);
+                        if self.objects[y].dead() && (self.objects[y].get_banner() != self.objects[x].get_banner()) {
+                            /*let killah = self.get_client_by_banner(self.objects[x].get_banner()).await;
                             if killah.is_some() {
-                                let amount = y_lockah.capture().await as i32;
+                                let amount = self.objects[y].capture().await as i32;
                                 killah.unwrap().lock().await.collect(amount).await;
                             }*/
-                            self.broadcast_tx.send(ClientCommand::ScoreTo (x_lockah.get_banner(), y_lockah.capture() as i32)).expect("Broadcast failed");
-                            if y_lockah.does_grant_a2a() {
-                                self.broadcast_tx.send(ClientCommand::GrantA2A (x_lockah.get_banner())).expect("Broadcast failed part 2");
+                            self.broadcast_tx.send(ClientCommand::ScoreTo (self.objects[x].get_banner(), self.objects[y].capture() as i32)).expect("Broadcast failed");
+                            if self.objects[y].does_grant_a2a() {
+                                self.broadcast_tx.send(ClientCommand::GrantA2A (self.objects[x].get_banner())).expect("Broadcast failed part 2");
                             }
                         }
                         is_collide = true;
                     }
                     if is_collide {
-                        if x_lockah.exposed_properties.physics.solid || y_lockah.exposed_properties.physics.solid {
-                            let sum = y_lockah.exposed_properties.physics.velocity.magnitude() + x_lockah.exposed_properties.physics.velocity.magnitude();
+                        if self.objects[x].exposed_properties.physics.solid || self.objects[y].exposed_properties.physics.solid {
+                            let sum = self.objects[y].exposed_properties.physics.velocity.magnitude() + self.objects[x].exposed_properties.physics.velocity.magnitude();
                             let ratio = if sum == 0.0 {
-                                //y_lockah.physics.mass / (x_lockah.physics.mass + y_lockah.physics.mass)
-                                if y_lockah.exposed_properties.physics.mass < x_lockah.exposed_properties.physics.mass {
+                                //self.objects[y].physics.mass / (self.objects[x].physics.mass + self.objects[y].physics.mass)
+                                if self.objects[y].exposed_properties.physics.mass < self.objects[x].exposed_properties.physics.mass {
                                     0.0
                                 } else {
                                     1.0
                                 }
                             }
                             else {
-                                x_lockah.exposed_properties.physics.velocity.magnitude() / sum
+                                self.objects[x].exposed_properties.physics.velocity.magnitude() / sum
                             };
-                            if !x_lockah.exposed_properties.physics.fixed {
-                                x_lockah.exposed_properties.physics.shape.translate(intasectah.1 * ratio); // I have no clue if this is correct but it works well enough
+                            if !self.objects[x].exposed_properties.physics.fixed {
+                                self.objects[x].exposed_properties.physics.shape.translate(intasectah.1 * ratio); // I have no clue if this is correct but it works well enough
                             }
-                            if !y_lockah.exposed_properties.physics.fixed {
-                                y_lockah.exposed_properties.physics.shape.translate(intasectah.1 * -1.0 * (1.0 - ratio));
+                            if !self.objects[y].exposed_properties.physics.fixed {
+                                self.objects[y].exposed_properties.physics.shape.translate(intasectah.1 * -1.0 * (1.0 - ratio));
                             }
                             if sum != 0.0 {
                                 // WIP real collisions - very complex, I don't know enough physics rn but am learning
-                                /*let m1 = y_lockah.physics.mass;
-                                let m2 = x_lockah.physics.mass;
+                                /*let m1 = self.objects[y].physics.mass;
+                                let m2 = self.objects[x].physics.mass;
                                 let total = m1 + m2;
-                                let merged = y_lockah.physics.velocity * m1 + x_lockah.physics.velocity * m2;
-                                y_lockah.physics.velocity = (merged - ((y_lockah.physics.velocity - x_lockah.physics.velocity) * m2 * y_lockah.physics.restitution)) / total;
-                                x_lockah.physics.velocity = (merged - ((x_lockah.physics.velocity - y_lockah.physics.velocity) * m1 * x_lockah.physics.restitution)) / total;*/
+                                let merged = self.objects[y].physics.velocity * m1 + self.objects[x].physics.velocity * m2;
+                                self.objects[y].physics.velocity = (merged - ((self.objects[y].physics.velocity - self.objects[x].physics.velocity) * m2 * self.objects[y].physics.restitution)) / total;
+                                self.objects[x].physics.velocity = (merged - ((self.objects[x].physics.velocity - self.objects[y].physics.velocity) * m1 * self.objects[x].physics.restitution)) / total;*/
                                 // DUMB FULLY ELASTIC VERSION
-                                //y_lockah.physics.velocity = (y_lockah.physics.velocity * (m1 - m2) + x_lockah.physics.velocity * 2.0 * m1) / total;
-                                //x_lockah.physics.velocity = (x_lockah.physics.velocity * (m2 - m1) + y_lockah.physics.velocity * 2.0 * m2) / total;
+                                //self.objects[y].physics.velocity = (self.objects[y].physics.velocity * (m1 - m2) + self.objects[x].physics.velocity * 2.0 * m1) / total;
+                                //self.objects[x].physics.velocity = (self.objects[x].physics.velocity * (m2 - m1) + self.objects[y].physics.velocity * 2.0 * m2) / total;
                                 // DUMB OLD VERSION
-                                /*let (x_para, x_perp) = x_lockah.physics.velocity.cut(intasectah.1);
-                                let (y_para, y_perp) = y_lockah.physics.velocity.cut(intasectah.1);
-                                y_lockah.physics.velocity = x_perp * (y_lockah.physics.velocity.magnitude()/sum) + y_para; // add the old perpendicular component, allowing it to slide
-                                x_lockah.physics.velocity = y_perp * (x_lockah.physics.velocity.magnitude()/sum) + x_para;*/
+                                /*let (x_para, x_perp) = self.objects[x].physics.velocity.cut(intasectah.1);
+                                let (y_para, y_perp) = self.objects[y].physics.velocity.cut(intasectah.1);
+                                self.objects[y].physics.velocity = x_perp * (self.objects[y].physics.velocity.magnitude()/sum) + y_para; // add the old perpendicular component, allowing it to slide
+                                self.objects[x].physics.velocity = y_perp * (self.objects[x].physics.velocity.magnitude()/sum) + x_para;*/
                                 // VERY DUMB VERSION
-                                let m1 = y_lockah.exposed_properties.physics.mass;
-                                let m2 = x_lockah.exposed_properties.physics.mass;
+                                let m1 = self.objects[y].exposed_properties.physics.mass;
+                                let m2 = self.objects[x].exposed_properties.physics.mass;
                                 let total = m1 + m2;
-                                let (x_para, x_perp) = x_lockah.exposed_properties.physics.velocity.cut(intasectah.1);
-                                let (y_para, y_perp) = y_lockah.exposed_properties.physics.velocity.cut(intasectah.1);
-                                if !y_lockah.exposed_properties.physics.fixed {
-                                    y_lockah.exposed_properties.physics.velocity = y_perp + x_para * (m2 / total);
+                                let (x_para, x_perp) = self.objects[x].exposed_properties.physics.velocity.cut(intasectah.1);
+                                let (y_para, y_perp) = self.objects[y].exposed_properties.physics.velocity.cut(intasectah.1);
+                                if !self.objects[y].exposed_properties.physics.fixed {
+                                    self.objects[y].exposed_properties.physics.velocity = y_perp + x_para * (m2 / total);
                                 }
-                                if !x_lockah.exposed_properties.physics.fixed {
-                                    x_lockah.exposed_properties.physics.velocity = x_perp + y_para * (m1 / total);
+                                if !self.objects[x].exposed_properties.physics.fixed {
+                                    self.objects[x].exposed_properties.physics.velocity = x_perp + y_para * (m1 / total);
                                 }
                             }
                         }
@@ -467,13 +466,11 @@ impl Server {
         }
     }
 
-    async fn send_physics_updates(&mut self) {
-        let mut i : i32 = 0;
-        while i < self.objects.len() as i32 {
-            let lockah_thang = self.objects[i as usize].clone();
-            let mut obj = lockah_thang.lock().await;
-            let mut args_vec = vec![obj.get_id().to_string()];
-            let phys = obj.get_physics_object();
+    fn send_physics_updates(&mut self) {
+        let mut i : usize = 0;
+        while i < self.objects.len() {
+            let mut args_vec = vec![self.objects[i].get_id().to_string()];
+            let phys = self.objects[i].get_physics_object();
             if phys.translated() || phys.rotated() || phys.resized() {
                 args_vec.push(phys.cx().to_string());
                 args_vec.push(phys.cy().to_string());
@@ -491,45 +488,50 @@ impl Server {
                     args: args_vec
                 });
             }
-            obj.update(self).await;
+            unsafe {
+                (*(&mut self.objects as *mut Vec<GamePieceBase>))[i].update(self);
+            }
             // Do death checks a bit late (pun not intended) so objects have a chance to self-rescue.
-            if obj.dead() {
-                self.objects.remove(i as usize);
-                i -= 1;
-                obj.die(self).await;
+            if self.objects[i].dead() {
+                unsafe {
+                    (*(&mut self.objects as *mut Vec<GamePieceBase>))[i].die(self);
+                }
                 self.broadcast(ProtocolMessage {
                     command: 'd',
-                    args: vec![obj.get_id().to_string()]
+                    args: vec![self.objects[i].get_id().to_string()]
                 });
+                self.objects.remove(i as usize);
+                continue; // don't allow it to reach the increment
             }
             i += 1;
         }
     }
 
-    async fn clear_of_banner(&mut self, banner : usize) {
+    fn clear_of_banner(&mut self, banner : usize) {
         if banner == 0 {
             return; // Never clear banner 0. That's just dumb. If you want to clear banner 0 manually delete the entire list.
         }
-        let mut i : i32 = 0;
-        while i < self.objects.len() as i32 {
-            let lockah_thang = self.objects[i as usize].clone();
-            let obj = lockah_thang.lock().await;
-            if obj.get_banner() == banner {
-                self.objects.remove(i as usize);
-                i -= 1;
+        let mut i : usize = 0;
+        while i < self.objects.len() {
+            let mut delted = false;
+            if self.objects[i].get_banner() == banner {
                 self.broadcast(ProtocolMessage {
                     command: 'd',
-                    args: vec![obj.get_id().to_string()]
+                    args: vec![self.objects[i].get_id().to_string()]
                 });
+                self.objects.remove(i);
+                delted = true;
             }
-            i += 1;
+            if !delted { // WASTING a SINGLE CYCLE. hee hee hee.
+                i += 1;
+            }
         }
     }
 
-    async fn mainloop(&mut self) {
+    fn mainloop(&mut self) {
         if self.mode == GameMode::Waiting {
             if self.is_io {
-                self.start().await;
+                self.start();
             }
             if self.autonomous.is_some() {
                 if self.living_players >= self.autonomous.unwrap().0 {
@@ -547,7 +549,7 @@ impl Server {
                             args: vec![self.autonomous.unwrap().2.to_string()]
                         });
                         if self.autonomous.unwrap().2 <= 0 {
-                            self.start().await;
+                            self.start();
                         }
                     }
                 }
@@ -571,7 +573,7 @@ impl Server {
                         args: vec![]
                     });
                     println!("Tie broadcast complete.");
-                    self.reset().await;
+                    self.reset();
                 }
                 else {
                     for team in &self.teams {
@@ -581,7 +583,7 @@ impl Server {
                                 command: 'E',
                                 args: vec![team.banner_id.to_string()]
                             });
-                            self.reset().await;
+                            self.reset();
                             return;
                         }
                     }
@@ -591,20 +593,20 @@ impl Server {
                             command: 'E',
                             args: vec![self.winning_banner.to_string()]
                         });
-                        self.reset().await;
+                        self.reset();
                     }
                 }
             }
             if self.mode == GameMode::Play {
-                self.send_physics_updates().await;
+                self.send_physics_updates();
             }
             self.broadcast_tx.send(ClientCommand::Tick (self.counter, (if self.mode == GameMode::Strategy { "1" } else { "0" }).to_string())).expect("Broadcast failed");
             if self.mode == GameMode::Play {
-                self.deal_with_objects().await;
+                self.deal_with_objects();
                 self.place_timer -= 1;
                 if self.place_timer <= 0 {
-                    self.place_timer = self.random.lock().await.next() % 200 + 50;
-                    self.place_random_rubble().await;
+                    self.place_timer = rand::random::<u32>() % 200 + 50;
+                    self.place_random_rubble();
                 }
             }
         }
@@ -632,10 +634,10 @@ impl Server {
         });
     }
 
-    async fn start(&mut self) {
+    fn start(&mut self) {
         if self.mode == GameMode::Waiting {
             for _ in 0..std::cmp::min(((self.gamesize * self.gamesize) / 1000000.0) as u32, 200) { // One per 1,000,000 square pixels, or 200, whichever is lower.
-                self.place_random_rubble().await;
+                self.place_random_rubble();
             }
             self.set_mode(GameMode::Strategy);
             println!("Game start.");
@@ -657,22 +659,24 @@ impl Server {
         self.broadcast_tx.send(ClientCommand::ChatRoom (content, sender, priority, to_whom)).expect("Chat message failed");
     }
 
-    async fn add(&mut self, pc : Arc<Mutex<GamePieceBase>>, mut sender : Option<&mut Client>) {
-        let mut piece = pc.lock().await;
+    fn add(&mut self, mut piece : GamePieceBase, sender : Option<&mut Client>) -> u32 {
         piece.set_id(self.top_id);
         self.top_id += 1;
         if sender.is_some(){
             piece.set_banner(sender.as_ref().unwrap().banner);
-            sender.as_mut().unwrap().send_protocol_message(ProtocolMessage {
+            /*sender.as_mut().unwrap().send_protocol_message(ProtocolMessage {
                 command: 'a',
                 args: vec![piece.get_id().to_string()]
-            }).await;
+            }).await;*/
+            self.broadcast_tx.send(ClientCommand::AttachToBanner (piece.get_id(), sender.unwrap().banner)).expect("Broadcast FAILED!");
         }
         self.broadcast(piece.get_new_message());
-        self.objects.push(pc.clone());
+        let ret = piece.get_id();
+        self.objects.push(piece);
+        ret
     }
 
-    async fn authenticate(&self, password : String, spectator : bool) -> AuthState {
+    fn authenticate(&self, password : String, spectator : bool) -> AuthState {
         if spectator {
             return AuthState::Spectator
         }
@@ -693,7 +697,7 @@ impl Server {
         return AuthState::Error;
     }
 
-    async fn banner_add(&mut self, mut dispatcha : Option<&mut Client>, mut banner : Arc<String>) -> usize {
+    fn banner_add(&mut self, mut dispatcha : Option<&mut Client>, mut banner : Arc<String>) -> usize {
         while self.banners.contains(&banner) {
             banner = Arc::new(banner.to_string() + ".copy");
         }
@@ -716,7 +720,7 @@ impl Server {
         bannah
     }
 
-    async fn get_team_of_banner(&self, banner : usize) -> Option<usize> {
+    fn get_team_of_banner(&self, banner : usize) -> Option<usize> {
         for team in 0..self.teams.len() {
             for member in &self.teams[team].members {
                 if *member == banner {
@@ -731,7 +735,7 @@ impl Server {
         println!("Sending metadata to {}", self.banners[user.banner]);
         for index in 0..self.banners.len() {
             let banner = &self.banners[index];
-            let team = self.get_team_of_banner(index).await;
+            let team = self.get_team_of_banner(index);
             println!("Team: {:?}", team);
             let mut args = vec![index.to_string(), banner.to_string()];
             if team.is_some(){
@@ -743,7 +747,7 @@ impl Server {
             }).await;
         }
         for piece in &self.objects {
-            user.send_protocol_message(piece.lock().await.get_new_message()).await;
+            user.send_protocol_message(piece.get_new_message()).await;
         }
         user.send_protocol_message(ProtocolMessage { // m also doubles as a "you have all the data" message
             command: 'm',
@@ -760,7 +764,7 @@ impl Server {
         self.metadata(user).await;
     }
 
-    async fn reset(&mut self) {
+    fn reset(&mut self) {
         println!("############## RESETTING ##############");
         /*while self.clients.len() > 0 {
             self.clients[0].lock().await.do_close = true;
@@ -772,7 +776,7 @@ impl Server {
         }
         self.set_mode(GameMode::Waiting);
         self.clear_banners();
-        self.load_config().await;
+        self.load_config();
     }
 
     fn clear_banners(&mut self) {
@@ -782,15 +786,15 @@ impl Server {
         }
     }
 
-    async fn load_config(&mut self) {
+    fn load_config(&mut self) {
         if self.config.is_some() {
             let config = self.config.as_ref().unwrap().clone();
-            config.load_into(self).await;
+            config.load_into(self);
         }
     }
 
-    async fn new_team(&mut self, name : String, password : String) {
-        let banner = self.banner_add(None, Arc::new(name)).await;
+    fn new_team(&mut self, name : String, password : String) {
+        let banner = self.banner_add(None, Arc::new(name));
         let id = self.teams.len();
         self.teams.push(TeamData {
             id,
@@ -947,7 +951,7 @@ impl Client {
     async fn handle(&mut self, message : ProtocolMessage, mut server : tokio::sync::MutexGuard<'_, Server>) {
         if message.command == 'c' && !self.is_authorized {
             if server.new_user_can_join() {
-                let lockah = server.authenticate(message.args[0].clone(), message.args[2] == "spectator").await;
+                let lockah = server.authenticate(message.args[0].clone(), message.args[2] == "spectator");
                 match lockah { // If you condense this, for === RUST REASONS === it keeps the mutex locked.
                     AuthState::Error => {
                         println!("New user has invalid password!");
@@ -958,7 +962,7 @@ impl Client {
                         println!("New user has authenticated as single player");
                         self.send_singlet('s').await;
                         server.user_logged_in(self).await;
-                        server.banner_add(Some(self), Arc::new(message.args[1].clone())).await;
+                        server.banner_add(Some(self), Arc::new(message.args[1].clone()));
                         self.is_authorized = true;
                     },
                     AuthState::Team (team, tl) => {
@@ -970,7 +974,7 @@ impl Client {
                             self.is_team_leader = true;
                         }
                         server.user_logged_in(self).await;
-                        server.banner_add(Some(self), Arc::new(message.args[1].clone())).await;
+                        server.banner_add(Some(self), Arc::new(message.args[1].clone()));
                         server.teams[team].members.push(self.banner);
                         self.is_authorized = true;
                     },
@@ -1024,27 +1028,27 @@ impl Client {
                                     if !self.has_placed {
                                         self.has_placed = true;
                                         server.costs = false;
-                                        self.m_castle = Some(server.place_castle(x, y, self.mode == ClientMode::RealTimeFighter, Some(self)).await);
+                                        self.m_castle = Some(server.place_castle(x, y, self.mode == ClientMode::RealTimeFighter, Some(self)));
                                         self.commandah.send(ServerCommand::LivePlayerInc (self.team, self.mode)).await.expect("Broadcast failed");
                                         match self.mode {
                                             ClientMode::Normal => {
-                                                server.place_basic_fighter(x - 200.0, y, PI, Some(self)).await;
-                                                server.place_basic_fighter(x + 200.0, y, 0.0, Some(self)).await;
-                                                server.place_basic_fighter(x, y - 200.0, 0.0, Some(self)).await;
-                                                server.place_basic_fighter(x, y + 200.0, 0.0, Some(self)).await;
+                                                server.place_basic_fighter(x - 200.0, y, PI, Some(self));
+                                                server.place_basic_fighter(x + 200.0, y, 0.0, Some(self));
+                                                server.place_basic_fighter(x, y - 200.0, 0.0, Some(self));
+                                                server.place_basic_fighter(x, y + 200.0, 0.0, Some(self));
                                                 self.collect(100).await;
                                             },
                                             ClientMode::RealTimeFighter => {
-                                                server.place_basic_fighter(x - 100.0, y, PI, Some(self)).await;
-                                                server.place_basic_fighter(x + 100.0, y, 0.0, Some(self)).await;
+                                                server.place_basic_fighter(x - 100.0, y, PI, Some(self));
+                                                server.place_basic_fighter(x + 100.0, y, 0.0, Some(self));
                                                 self.send_singlet('A').await;
                                                 self.a2a += 1;
                                             },
                                             ClientMode::Defense => {
-                                                server.place_basic_fighter(x - 200.0, y, PI, Some(self)).await;
-                                                server.place_basic_fighter(x + 200.0, y, 0.0, Some(self)).await;
-                                                server.place_turret(x, y - 200.0, 0.0, Some(self)).await;
-                                                server.place_turret(x, y + 200.0, 0.0, Some(self)).await;
+                                                server.place_basic_fighter(x - 200.0, y, PI, Some(self));
+                                                server.place_basic_fighter(x + 200.0, y, 0.0, Some(self));
+                                                server.place_turret(x, y - 200.0, 0.0, Some(self));
+                                                server.place_turret(x, y + 200.0, 0.0, Some(self));
                                                 self.collect(25).await;
                                             },
                                             _ => {
@@ -1059,40 +1063,48 @@ impl Client {
                                     }
                                 },
                                 "f" => {
-                                    server.place_basic_fighter(x, y, 0.0, Some(self)).await;
+                                    server.place_basic_fighter(x, y, 0.0, Some(self));
                                 },
                                 "w" => {
-                                    server.place_wall(x, y, Some(self)).await;
+                                    server.place_wall(x, y, Some(self));
                                 },
                                 "t" => {
-                                    server.place_tie_fighter(x, y, 0.0, Some(self)).await;
+                                    server.place_tie_fighter(x, y, 0.0, Some(self));
                                 },
                                 "s" => {
-                                    server.place_sniper(x, y, 0.0, Some(self)).await;
+                                    server.place_sniper(x, y, 0.0, Some(self));
                                 },
                                 "h" => {
-                                    server.place_missile(x, y, 0.0, Some(self)).await;
+                                    server.place_missile(x, y, 0.0, Some(self));
                                 },
                                 "T" => {
-                                    server.place_turret(x, y, 0.0, Some(self)).await;
+                                    server.place_turret(x, y, 0.0, Some(self));
                                 },
                                 "n" => {
-                                    server.place_nuke(x, y, 0.0, Some(self)).await;
+                                    server.place_nuke(x, y, 0.0, Some(self));
                                 },
                                 "F" => {
-                                    let fort = server.place_fort(x, y, 0.0, Some(self)).await;
-                                    if self.m_castle.is_some() {
-                                        self.m_castle.as_mut().unwrap().lock().await.add_fort(fort);
+                                    match self.m_castle {
+                                        Some(cid) => {
+                                            match server.obj_lookup(cid) {
+                                                Some(index) => {
+                                                    let fort = server.place_fort(x, y, 0.0, Some(self));
+                                                    server.objects[index].add_fort(fort);
+                                                }
+                                                None => {}
+                                            }
+                                        }
+                                        None => {}
                                     }
                                 },
                                 "m" => {
-                                    server.place_mls(x, y, 0.0, Some(self)).await;
+                                    server.place_mls(x, y, 0.0, Some(self));
                                 },
                                 "a" => {
-                                    server.place_antirtf_missile(x, y, 0.0, Some(self)).await;
+                                    server.place_antirtf_missile(x, y, 0.0, Some(self));
                                 },
                                 "K" => {
-                                    server.place_carrier(x, y, 0.0, Some(self)).await;
+                                    server.place_carrier(x, y, 0.0, Some(self));
                                 },
                                 &_ => {
                                     message.poison("INVALID PLACE TYPE");
@@ -1154,12 +1166,11 @@ impl Client {
                             return;
                         }
                     };
-                    for object in &server.objects {
-                        let mut lock = object.lock().await;
-                        if lock.get_id() == id && lock.get_banner() == self.banner {
-                            lock.exposed_properties.goal_x = x;
-                            lock.exposed_properties.goal_y = y;
-                            lock.exposed_properties.goal_a = a;
+                    for object in &mut server.objects {
+                        if object.get_id() == id && object.get_banner() == self.banner {
+                            object.exposed_properties.goal_x = x;
+                            object.exposed_properties.goal_y = y;
+                            object.exposed_properties.goal_a = a;
                         }
                     }
                 },
@@ -1172,20 +1183,28 @@ impl Client {
                             Ok(numbah) => {
                                 let mut obj_vec = None;
                                 for obj in &server.objects {
-                                    let objlock = obj.lock().await;
-                                    if objlock.get_id() == numbah {
-                                        obj_vec = Some(objlock.exposed_properties.physics.vector_position());
+                                    if obj.get_id() == numbah {
+                                        obj_vec = Some(obj.exposed_properties.physics.vector_position());
                                     }
                                 }
                                 match obj_vec {
                                     None => {},
                                     Some (vec) => {
-                                        let clawn = self.m_castle.as_ref().unwrap().clone();
-                                        let lock = clawn.lock().await;
-                                        if (lock.exposed_properties.physics.vector_position() - vec).magnitude() < 700.0 {
-                                            self.a2a -= 1;
-                                            let pos = lock.exposed_properties.physics.vector_position() + Vector2::new_from_manda(50.0, lock.exposed_properties.physics.angle());
-                                            server.place_air2air(pos.x, pos.y, lock.exposed_properties.physics.angle() - PI/2.0, numbah, Some(self)).await;
+                                        match self.m_castle {
+                                            Some(castleid) => {
+                                                match server.obj_lookup(castleid) {
+                                                    Some (index) => {
+                                                        if (server.objects[index].exposed_properties.physics.vector_position() - vec).magnitude() < 700.0 {
+                                                            self.a2a -= 1;
+                                                            let pos = server.objects[index].exposed_properties.physics.vector_position() + Vector2::new_from_manda(50.0, server.objects[index].exposed_properties.physics.angle());
+                                                            let launchangle = server.objects[index].exposed_properties.physics.angle() - PI/2.0; // rust requires this to be explicit because of the dumbass borrow checker
+                                                            server.place_air2air(pos.x, pos.y, launchangle, numbah, Some(self));
+                                                        }
+                                                    }
+                                                    None => {}
+                                                }
+                                            }
+                                            None => {}
                                         }
                                     }
                                 }
@@ -1200,30 +1219,38 @@ impl Client {
                 },
                 'R' => {
                     if server.mode == GameMode::Play && self.m_castle.is_some(){
-                        let le_castle = self.m_castle.as_mut().unwrap().clone();
-                        let mut castle = le_castle.lock().await;
-                        let mut thrust = 0.0;
-                        let mut resistance = 1.0;
-                        let mut angle_thrust = 0.0;
-                        if message.args[0] == "1" { // THRUST
-                            thrust = 2.0;
+                        match self.m_castle {
+                            Some (cid) => {
+                                match server.obj_lookup(cid) {
+                                    Some (index) => {
+                                        let mut thrust = 0.0;
+                                        let mut resistance = 1.0;
+                                        let mut angle_thrust = 0.0;
+                                        if message.args[0] == "1" { // THRUST
+                                            thrust = 2.0;
+                                        }
+                                        if message.args[1] == "1" { // TURN LEFT
+                                            angle_thrust -= 0.02;
+                                        }
+                                        if message.args[2] == "1" { // TURN RIGHT
+                                            angle_thrust += 0.02;
+                                        }
+                                        if message.args[3] == "1" { // AIRBRAKE
+                                            resistance = 0.8;
+                                        }
+                                        server.objects[index].exposed_properties.shooter_properties.suppress = !(message.args[4] == "1");
+                                        let thrust = Vector2::new_from_manda(thrust, server.objects[index].exposed_properties.physics.angle() - PI/2.0);
+                                        server.objects[index].exposed_properties.physics.velocity += thrust;
+                                        server.objects[index].exposed_properties.physics.velocity *= resistance;
+                                        server.objects[index].exposed_properties.physics.angle_v += angle_thrust;
+                                        server.objects[index].exposed_properties.physics.angle_v *= 0.9;
+                                        server.objects[index].exposed_properties.physics.angle_v *= resistance;
+                                    }
+                                    None => {}
+                                }
+                            }
+                            None => {}
                         }
-                        if message.args[1] == "1" { // TURN LEFT
-                            angle_thrust -= 0.02;
-                        }
-                        if message.args[2] == "1" { // TURN RIGHT
-                            angle_thrust += 0.02;
-                        }
-                        if message.args[3] == "1" { // AIRBRAKE
-                            resistance = 0.8;
-                        }
-                        castle.exposed_properties.shooter_properties.suppress = !(message.args[4] == "1");
-                        let thrust = Vector2::new_from_manda(thrust, castle.exposed_properties.physics.angle() - PI/2.0);
-                        castle.exposed_properties.physics.velocity += thrust;
-                        castle.exposed_properties.physics.velocity *= resistance;
-                        castle.exposed_properties.physics.angle_v += angle_thrust;
-                        castle.exposed_properties.physics.angle_v *= 0.9;
-                        castle.exposed_properties.physics.angle_v *= resistance;
                     }
                 },
                 'T' => { // Talk
@@ -1267,10 +1294,9 @@ impl Client {
                     let price = *server.upg_costs.entry(message.args[1].clone()).or_insert(0);
                     if self.score >= price {
                         self.collect(-price).await;
-                        for object in &server.objects {
-                            let mut lawk = object.lock().await;
-                            if lawk.get_id() == id {
-                                lawk.upgrade(upg);
+                        for object in &mut server.objects {
+                            if object.get_id() == id {
+                                object.upgrade(upg);
                                 break;
                             }
                         }
@@ -1297,9 +1323,9 @@ impl Client {
         println!("Client close routine!");
     }
 
-    async fn is_alive(&self) -> bool {
+    fn is_alive(&self, server : tokio::sync::MutexGuard<'_, Server>) -> bool {
         if self.m_castle.is_some() {
-            if !(self.m_castle.as_ref().unwrap().lock().await.dead()) {
+            if server.obj_lookup(self.m_castle.unwrap()).is_some() {
                 return true;
             }
         }
@@ -1367,16 +1393,22 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                         if modechar == "0" { // if it's play mode
                             moi.places_this_turn = 0;
                         }
-                        server.lock().await.winning_banner = moi.banner;
+                        let mut schlock = server.lock().await;
+                        schlock.winning_banner = moi.banner;
                         let mut args = vec![counter.to_string(), modechar];
                         if moi.m_castle.is_some() {
-                            args.push((moi.m_castle.as_ref().unwrap().lock().await.health()).to_string());
+                            match schlock.obj_lookup(moi.m_castle.unwrap()) {
+                                Some (index) => {
+                                    args.push(schlock.objects[index].health().to_string());
+                                },
+                                None => {}
+                            }
                         }
                         moi.send_protocol_message(ProtocolMessage {
                             command: 't',
                             args
                         }).await;
-                        if !moi.is_alive().await {
+                        if !moi.is_alive(schlock) {
                             if moi.m_castle.is_some() {
                                 moi.m_castle = None;
                                 moi.send_singlet('l').await;
@@ -1419,6 +1451,14 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                             moi.send_singlet('A').await;
                         }
                     },
+                    Ok (ClientCommand::AttachToBanner (id, banner)) => {
+                        if banner == moi.banner {
+                            moi.send_protocol_message(ProtocolMessage {
+                                command: 'a',
+                                args: vec![id.to_string()]
+                            }).await;
+                        }
+                    }
                     //_ => {}
                     Err (_) => {
 
@@ -1428,7 +1468,7 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
         }
     }
     let mut serverlock = server.lock().await;
-    if moi.is_alive().await {
+    if moi.m_castle.is_some() && serverlock.obj_lookup(moi.m_castle.unwrap()).is_some() {
         moi.commandah.send(ServerCommand::LivePlayerDec (moi.team, moi.mode)).await.expect("Broadcast failed");
     }
     moi.close();
@@ -1450,7 +1490,7 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
         serverlock.authenticateds -= 1;
     }
     if serverlock.is_io || serverlock.mode == GameMode::Waiting {
-        serverlock.clear_of_banner(moi.banner).await;
+        serverlock.clear_of_banner(moi.banner);
     }
     moi.commandah.send(ServerCommand::Disconnect).await.unwrap();
     println!("Dropped client");
@@ -1517,10 +1557,9 @@ async fn main(){
         authenticateds      : 0,
         terrain_seed        : rng.gen(),
         banners             : vec![Arc::new("None".to_string())],
-        top_id              : 0,
+        top_id              : 1, // id 0 is the "none" id
         counter             : 1,
         costs               : true,
-        random              : Arc::new(Mutex::new(Mulberry32::new(rng.gen()))),
         place_timer         : 100,
         autonomous          : None,
         is_io               : false,
@@ -1543,7 +1582,7 @@ async fn main(){
         ])
     };
     //rx.close().await;
-    server.load_config().await;
+    server.load_config();
     let port = server.port;
     let headless = server.is_headless;
     println!("Started server with password {}, terrain seed {}", server.password, server.terrain_seed);
@@ -1559,19 +1598,19 @@ async fn main(){
         loop {
             //use tokio::time::Instant;
             interval.tick().await;
-            let mut lawk = server_mutex_loopah.lock().await; // Tracking le deadlock: It *always*, invariably, hangs here. It never makes it inside the mainloop. Thus the problem cannot be directly related to the mainloop.
+            let mut lawk = server_mutex_loopah.lock().await;
             //let start = Instant::now();
-            lawk.mainloop().await;
+            lawk.mainloop();
             //println!("Mainloop took {:?}", start.elapsed());
             match commandget.try_recv() {
                 Ok (ServerCommand::Start) => {
-                    lawk.start().await;
+                    lawk.start();
                 },
                 Ok (ServerCommand::Flip) => {
                     lawk.flip();
                 },
                 Ok (ServerCommand::TeamNew (name, password)) => {
-                    lawk.new_team(name, password).await;
+                    lawk.new_team(name, password);
                 },
                 Ok (ServerCommand::Autonomous (min_players, max_players, auto_timeout)) => {
                     lawk.autonomous = Some((min_players, max_players, auto_timeout, auto_timeout));

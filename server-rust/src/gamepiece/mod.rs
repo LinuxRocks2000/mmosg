@@ -74,7 +74,7 @@ pub struct Targeting {
 #[derive(Clone)]
 pub struct CarrierProperties {
     pub space_remaining : u32, // amount of remaining carrier space
-    pub carrying : Vec<Arc<Mutex<GamePieceBase>>>, // list of things it is carrying
+    pub carrying : Vec<u32>, // list of things it is carrying
     pub does_accept : Vec<char>, // list of types it'll carry
     pub is_carried : bool // if it's being carried at the moment. objects being carried cannot shoot and don't do any collision damage.
 }
@@ -179,14 +179,14 @@ pub struct CollisionInfo {
 pub struct GamePieceBase {
     banner                 : usize,
     pub exposed_properties : ExposedProperties,
-    piece                  : Box<dyn GamePiece + Send + Sync>,
+    pub piece              : Box<dyn GamePiece + Send + Sync>, // public because the server has to touch it on occasion
     pub shoot_timer        : u32,
     broadcasts             : Vec<ProtocolMessage>,
-    forts                  : Vec<Arc<Mutex<GamePieceBase>>>,
+    forts                  : Vec<u32>,
     upgrades               : Vec<Arc<String>>
 }
 
-use tokio::sync::Mutex;
+use tokio::sync::Mutex; // LET THE WARNING ON THIS LINE FOREVER BE A TROPHY OF OUR VICTORY AGAINST MUTEXES
 use std::sync::Arc;
 
 impl GamePieceBase {
@@ -262,77 +262,74 @@ impl GamePieceBase {
         self.piece.does_grant_a2a()
     }
 
-    pub async fn target(&mut self, server : &mut Server) {
-        let mut best : Option<Arc<Mutex<GamePieceBase>>> = None;
+    pub fn target(&mut self, server : &mut Server) {
+        let mut best : Option<usize> = None;
         let mut best_value : f32 = 0.0; // If best is None, this value is ignored, so it can be anything.
         // The goal here is to compare the entire list of objects by some easily derived numerical component,
         // based on a set of options stored in targeting, and set the values in targeting based on that.
         // NOTE: the comparison is *always* <; if you want to compare > values multiply by negative 1.
-        for locked in &server.objects {
-            match locked.try_lock() {
-                Ok(object) => {
-                    if object.get_banner() == self.get_banner() { // If you're under the same flag, skip.
-                        continue;
-                    }
-                    let viable = match self.exposed_properties.targeting.filter {
-                        TargetingFilter::Any => {
-                            true
-                        },
-                        TargetingFilter::Fighters => {
-                            match object.identify() {
-                                'f' | 'h' | 'R' | 't' | 's' => true,
-                                _ => false
-                            }
-                        },
-                        TargetingFilter::Castles => {
-                            match object.identify() {
-                                'R' | 'c' => true,
-                                _ => false
-                            }
-                        },
-                        TargetingFilter::RealTimeFighter => {
-                            object.identify() == 'R'
-                        }
-                    };
-                    if viable {
-                        let val = match self.exposed_properties.targeting.mode {
-                            TargetingMode::Nearest => {
-                                let dist = (object.exposed_properties.physics.vector_position() - self.exposed_properties.physics.vector_position()).magnitude();
-                                if (dist >= self.exposed_properties.targeting.range.0 && dist <= self.exposed_properties.targeting.range.1) || self.exposed_properties.targeting.range.1 == 0.0 {
-                                    Some(dist)
-                                }
-                                else {
-                                    None
-                                }
-                            },
-                            TargetingMode::Id (id) => {
-                                if object.exposed_properties.id == id {
-                                    Some(0.0) // the id is always the best possibility
-                                }
-                                else {
-                                    None
-                                }
-                            },
-                            TargetingMode::None => None
-                        };
-                        if val.is_some() {
-                            if val.unwrap() < best_value || !best.is_some() {
-                                best_value = val.unwrap();
-                                best = Some(locked.clone());
-                            }
-                        }
+        for i in 0..server.objects.len() {
+            let object = &mut server.objects[i];
+            if object.get_banner() == self.get_banner() { // If you're under the same flag, skip. This has the
+            // added benefit of making sure it never attempts to track itself.
+                continue;
+            }
+            let viable = match self.exposed_properties.targeting.filter {
+                TargetingFilter::Any => {
+                    true
+                },
+                TargetingFilter::Fighters => {
+                    match object.identify() {
+                        'f' | 'h' | 'R' | 't' | 's' => true,
+                        _ => false
                     }
                 },
-                Err(_) => {
-                    // It's us, so don't worry about it: do nothing.
+                TargetingFilter::Castles => {
+                    match object.identify() {
+                        'R' | 'c' => true,
+                        _ => false
+                    }
+                },
+                TargetingFilter::RealTimeFighter => {
+                    object.identify() == 'R'
+                }
+            };
+            if viable {
+                let val = match self.exposed_properties.targeting.mode {
+                    TargetingMode::Nearest => {
+                        let dist = (object.exposed_properties.physics.vector_position() - self.exposed_properties.physics.vector_position()).magnitude();
+                        if (dist >= self.exposed_properties.targeting.range.0 && dist <= self.exposed_properties.targeting.range.1) || self.exposed_properties.targeting.range.1 == 0.0 {
+                            Some(dist)
+                        }
+                        else {
+                            None
+                        }
+                    },
+                    TargetingMode::Id (id) => {
+                        if object.exposed_properties.id == id {
+                            Some(0.0) // the id is always the best possibility
+                        }
+                        else {
+                            None
+                        }
+                    },
+                    TargetingMode::None => None
+                };
+                if val.is_some() {
+                    if val.unwrap() < best_value || !best.is_some() {
+                        best_value = val.unwrap();
+                        best = Some(i);
+                    }
                 }
             }
         }
-        if best.is_some() {
-            self.exposed_properties.targeting.vector_to = Some(best.unwrap().lock().await.exposed_properties.physics.vector_position() - self.exposed_properties.physics.vector_position());
-        }
-        else {
-            self.exposed_properties.targeting.vector_to = None;
+        match best {
+            Some(best) => {
+                self.exposed_properties.targeting.vector_to = Some(server.objects[best].exposed_properties.physics.vector_position() - self.exposed_properties.physics.vector_position());
+            }
+            None => {
+                self.exposed_properties.targeting.vector_to = None;
+            }
         }
     }
 
@@ -340,63 +337,58 @@ impl GamePieceBase {
         self.broadcasts.push(message);
     }
 
-    pub async fn on_carry(&mut self, thing : Arc<Mutex<GamePieceBase>>) {
-        self.exposed_properties.carrier_properties.carrying.push(thing.clone());
+    pub async fn on_carry(&mut self, mut thing : GamePieceBase) {
+        /*self.exposed_properties.carrier_properties.carrying.push(thing.get_id());
         self.exposed_properties.carrier_properties.space_remaining -= 1;
-        let mut lock = thing.lock().await;
-        lock.exposed_properties.carrier_properties.is_carried = true;
-        lock.exposed_properties.physics.velocity = Vector2::empty();
-        self.piece.on_carry(&mut self.exposed_properties, &mut lock.exposed_properties);
+        thing.exposed_properties.carrier_properties.is_carried = true;
+        thing.exposed_properties.physics.velocity = Vector2::empty();*/
+        self.piece.on_carry(&mut self.exposed_properties, &mut thing.exposed_properties);
     }
 
-    pub async fn update(&mut self, server : &mut Server) {
+    pub fn update(&mut self, server : &mut Server) {
         if self.exposed_properties.carrier_properties.is_carried {
             return; // quick short circuit: can't update if it's being carried, carriers freeze all activity so it's nice and ready for when it comes back out
         }
         let mut i : usize = 0;
         while i < self.forts.len() {
-            if self.forts[i].lock().await.dead() {
-                self.forts.remove(i);
-                continue; // Don't allow i to increment
+            match server.obj_lookup(self.forts[i]) {
+                Some(_) => {},
+                None => { // the fort object is dead, throw away the id
+                    self.forts.remove(i);
+                    continue; // Don't allow i to increment
+                }
             }
             i += 1;
         }
-        if self.exposed_properties.health_properties.health <= 0.0 && self.forts.len() > 0 { // DEADLOCK CONDITION: the fort is circularly linked. Unlikely.
-            let fortex = self.forts.remove(0); // pop out the oldest fort in the list
-            let mut fort = fortex.lock().await;
-            fort.exposed_properties.health_properties.health = -1.0; // kill the fort
+        if self.exposed_properties.health_properties.health <= 0.0 && self.forts.len() > 0 {
+            let fortid = self.forts.remove(0); // pop out the oldest fort in the list
+            let fort = server.obj_lookup(fortid).unwrap(); // the previous loop removes forts that don't exist, so at this point in the code it must be safe to unwrap
+            server.objects[fort].exposed_properties.health_properties.health = -1.0; // kill the fort
             self.exposed_properties.health_properties.health = self.exposed_properties.health_properties.max_health; // Restore to maximum health.
-            self.exposed_properties.physics.set_cx(fort.exposed_properties.physics.cx());
-            self.exposed_properties.physics.set_cy(fort.exposed_properties.physics.cy());
+            self.exposed_properties.physics.set_cx(server.objects[fort].exposed_properties.physics.cx());
+            self.exposed_properties.physics.set_cy(server.objects[fort].exposed_properties.physics.cy());
             return; // Don't die yet! You have a fort!
         }
         if self.exposed_properties.targeting.mode != TargetingMode::None {
-            self.target(server).await;
+            self.target(server);
         }
         self.exposed_properties.physics.update();
         self.piece.update(&mut self.exposed_properties, server);
-        let mut i : i32 = 0;
-        while i < self.exposed_properties.carrier_properties.carrying.len() as i32 {
-            let clone = self.exposed_properties.carrier_properties.carrying[i as usize].clone();
-            let mut lock = clone.lock().await;
-            if self.piece.carry_iter(&mut self.exposed_properties, &mut lock.exposed_properties, i as usize) { // drop the carried object
-                self.piece.drop_carry(&mut self.exposed_properties, &mut lock.exposed_properties, i as usize);
+        for i in 0..self.exposed_properties.carrier_properties.carrying.len() {
+            let obj = server.obj_lookup(self.exposed_properties.carrier_properties.carrying[i]).unwrap(); // unwrap is guaranteed safe here because carried objects can't under any circumstances be deleted
+            if self.piece.carry_iter(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties, i) { // drop the carried object
+                self.piece.drop_carry(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties, i);
                 self.exposed_properties.carrier_properties.space_remaining += 1;
-                lock.exposed_properties.carrier_properties.is_carried = false;
-                /*drop(lock);
-                self.exposed_properties.carrier_properties.carrying.remove(i as usize);
-                i -= 1;*/
+                server.objects[obj].exposed_properties.carrier_properties.is_carried = false;
             }
-            i += 1;
         }
-        i = 0;
-        while i < self.exposed_properties.carrier_properties.carrying.len() as i32 { // remove everything AFTER they've been released, so reordering doesn't cause problems above
-            let clone = self.exposed_properties.carrier_properties.carrying[i as usize].clone();
-            let lock = clone.lock().await;
-            if !lock.exposed_properties.carrier_properties.is_carried {
-                drop(lock);
-                self.exposed_properties.carrier_properties.carrying.remove(i as usize);
-                i -= 1;
+        let mut i : usize = 0;
+        while i < self.exposed_properties.carrier_properties.carrying.len() { // remove everything from the list AFTER they've been properly released, so reordering doesn't cause problems above
+            let obj = server.obj_lookup(self.exposed_properties.carrier_properties.carrying[i]).unwrap(); // unwrap is guaranteed safe here because carried objects can't under any circumstances be deleted
+            // TODO: optimize, we should only need one lookup per object for this instead of 2.
+            if !server.objects[obj].exposed_properties.carrier_properties.is_carried { // if it's been marked not-carried, so we still have an uncarried object in our carry list - problematic!
+                self.exposed_properties.carrier_properties.carrying.remove(i);
+                continue; // don't let it increment i
             }
             i += 1;
         }
@@ -417,7 +409,13 @@ impl GamePieceBase {
                 }
             }
             else {
-                self.shawty(self.exposed_properties.shooter_properties.range, server).await;
+                if self.shoot_timer == 0 {
+                    self.shoot_timer = self.exposed_properties.shooter_properties.counter;
+                    self.shawty(self.exposed_properties.shooter_properties.range, server);
+                }
+                else {
+                    self.shoot_timer -= 1;
+                }
             }
         }
         if self.exposed_properties.ttl > 0 {
@@ -436,16 +434,11 @@ impl GamePieceBase {
         }
     }
 
-    pub async fn shawty(&mut self, range : i32, server : &mut Server) {
-        if self.shoot_timer == 0 {
-            self.shoot_timer = self.exposed_properties.shooter_properties.counter;
-            for angle in &self.exposed_properties.shooter_properties.angles {
-                server.shoot(self.exposed_properties.shooter_properties.bullet_type, self.exposed_properties.physics.extend_point(50.0, *angle), Vector2::new_from_manda(20.0, self.exposed_properties.physics.angle() + *angle) + self.exposed_properties.physics.velocity, range, None).await
-                .lock().await.set_banner(self.banner); // Set the banner
-            }
-        }
-        else {
-            self.shoot_timer -= 1;
+    pub fn shawty(&mut self, range : i32, server : &mut Server) {
+        for angle in &self.exposed_properties.shooter_properties.angles {
+            let bullet_id = server.shoot(self.exposed_properties.shooter_properties.bullet_type, self.exposed_properties.physics.extend_point(50.0, *angle), Vector2::new_from_manda(20.0, self.exposed_properties.physics.angle() + *angle) + self.exposed_properties.physics.velocity, range, None);
+            let bullet = server.obj_lookup(bullet_id).unwrap(); // Unwrap is safe here because the object is guaranteed to exist at this point.
+            server.objects[bullet].set_banner(self.banner); // Set the banner.
         }
     }
 
@@ -461,12 +454,12 @@ impl GamePieceBase {
         self.exposed_properties.health_properties.health <= 0.0 && self.forts.len() == 0
     }
 
-    pub async fn die(&mut self, server : &mut Server) {
+    pub fn die(&mut self, server : &mut Server) {
         self.piece.on_die();
         for explosion in &self.exposed_properties.exploder {
             match explosion {
                 ExplosionMode::Radiation(size, halflife, strength) => {
-                    server.place_radiation(self.exposed_properties.physics.cx(), self.exposed_properties.physics.cy(), *size, *halflife, *strength, self.exposed_properties.physics.angle(), None).await;
+                    server.place_radiation(self.exposed_properties.physics.cx(), self.exposed_properties.physics.cy(), *size, *halflife, *strength, self.exposed_properties.physics.angle(), None);
                 },
                 _ => {
 
@@ -474,11 +467,12 @@ impl GamePieceBase {
             }
         }
         for carried in &self.exposed_properties.carrier_properties.carrying {
-            let mut lock = carried.lock().await;
-            lock.exposed_properties.carrier_properties.is_carried = false;
-            lock.exposed_properties.goal_x = lock.exposed_properties.physics.cx();
-            lock.exposed_properties.goal_y = lock.exposed_properties.physics.cy();
-            lock.exposed_properties.goal_a = lock.exposed_properties.physics.angle();
+            let obj = server.obj_lookup(*carried).unwrap(); // if it's being carried, it's guaranteed to not be deleted, so unwrapping is safe.
+            // MAY BE PROBLEMATIC!
+            server.objects[obj].exposed_properties.carrier_properties.is_carried = false;
+            server.objects[obj].exposed_properties.goal_x = server.objects[obj].exposed_properties.physics.cx();
+            server.objects[obj].exposed_properties.goal_y = server.objects[obj].exposed_properties.physics.cy();
+            server.objects[obj].exposed_properties.goal_a = server.objects[obj].exposed_properties.physics.angle();
         }
     }
 
@@ -539,8 +533,8 @@ impl GamePieceBase {
         self.piece.capture()
     }
 
-    pub fn add_fort(&mut self, fort : Arc<Mutex<GamePieceBase>>) {
-        self.forts.push(fort);
+    pub fn add_fort(&mut self, fortid : u32) {
+        self.forts.push(fortid);
     }
 
     pub fn get_max_health(&self) -> f32 {
