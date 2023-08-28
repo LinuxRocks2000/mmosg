@@ -164,7 +164,7 @@ impl GamePiece for Carrier {
         }
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         80
     }
 
@@ -249,7 +249,7 @@ impl GamePiece for AntiRTFBullet {
         }
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         7
     }
 }
@@ -298,7 +298,7 @@ impl GamePiece for Air2Air {
         }
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         0
     }
 
@@ -379,7 +379,7 @@ impl GamePiece for Turret {
         };
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         100
     }
 }
@@ -416,7 +416,7 @@ impl GamePiece for MissileLaunchingSystem {
         };
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         100
     }
 }
@@ -466,7 +466,7 @@ impl GamePiece for Nuke {
         PhysicsObject::new(0.0, 0.0, 36.0, 36.0, 0.0)
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         300
     }
 

@@ -84,7 +84,7 @@ enum ClientCommand { // Commands sent to clients
     CloseAll,
     ChatRoom (String, usize, u8, Option<usize>), // message, sender, priority
     GrantA2A (usize),
-    AttachToBanner (u32, usize)
+    AttachToBanner (u32, usize, bool)
 }
 
 
@@ -163,11 +163,11 @@ impl Server {
         return true;
     }
 
-    fn place(&mut self, piece : Box<dyn GamePiece + Send + Sync>, x : f32, y : f32, a : f32, mut sender : Option<&mut Client>) -> u32 { // return the id of the object released
+    fn place(&mut self, piece : Box<dyn GamePiece + Send + Sync>, x : f32, y : f32, a : f32, banner : Option<usize>) -> u32 { // return the id of the object released
         let zone = piece.req_zone();
         let la_thang = GamePieceBase::new(piece, x, y, a);
-        if sender.is_some() {
-            let banner = sender.as_ref().unwrap().banner;
+        if banner.is_some() {
+            let banner = banner.unwrap();
             if !match zone {
                 ReqZone::NoZone => true,
                 ReqZone::WithinCastleOrFort => {
@@ -180,18 +180,18 @@ impl Server {
                     self.is_clear(x, y) || self.is_inside_friendly(x, y, banner, 'c') || self.is_inside_friendly(x, y, banner, 'F')
                 }
             } {
-                sender.as_mut().unwrap().kys = true; // drop the client, something nefarious is going on
+                //sender.as_mut().unwrap().kys = true; // drop the client, something nefarious is going on
                 return 0; // refuse to place, returning nothing.
             }
-            if self.costs {
+            /*if self.costs {
                 let cost = la_thang.cost() as i32;
                 if cost > sender.as_ref().unwrap().score {
                     return 0;
                 }
                 self.broadcast_tx.send(ClientCommand::ScoreTo (banner, -cost)).expect("BROADCAST FAILED");
-            }
+            }*/
         }
-        self.add(la_thang, sender)
+        self.add(la_thang, banner)
     }
 
     fn obj_lookup(&self, id : u32) -> Option<usize> { // GIVEN the ID of an OBJECT, return the INDEX or NONE if it DOES NOT EXIST.
@@ -203,15 +203,15 @@ impl Server {
         return None;
     }
 
-    fn place_wall(&mut self, x : f32, y : f32, sender : Option<&mut Client>) {
+    fn place_wall(&mut self, x : f32, y : f32, sender : Option<usize>) {
         self.place(Box::new(Wall::new()), x, y, 0.0, sender);
     }
 
-    fn place_castle(&mut self, x : f32, y : f32, is_rtf : bool, sender : Option<&mut Client>) -> u32 {
+    fn place_castle(&mut self, x : f32, y : f32, is_rtf : bool, sender : Option<usize>) -> u32 {
         self.place(Box::new(Castle::new(is_rtf)), x, y, 0.0, sender)
     }
 
-    fn place_basic_fighter(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+    fn place_basic_fighter(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(BasicFighter::new()), x, y, a, sender)
     }
 
@@ -224,47 +224,47 @@ impl Server {
         self.objects[i].exposed_properties.physics.set_cy(y);
     }
 
-    fn place_tie_fighter(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+    fn place_tie_fighter(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(TieFighter::new()), x, y, a, sender)
     }
 
-    fn place_sniper(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+    fn place_sniper(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(Sniper::new()), x, y, a, sender)
     }
 
-    fn place_missile(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+    fn place_missile(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(Missile::new()), x, y, a, sender)
     }
 
-    fn place_turret(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+    fn place_turret(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(Turret::new()), x, y, a, sender)
     }
 
-    fn place_mls(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+    fn place_mls(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(MissileLaunchingSystem::new()), x, y, a, sender)
     }
 
-    fn place_antirtf_missile(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+    fn place_antirtf_missile(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(AntiRTFBullet::new()), x, y, a, sender)
     }
 
-    fn place_carrier(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+    fn place_carrier(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(Carrier::new()), x, y, a, sender)
     }
 
-    fn place_radiation(&mut self, x : f32, y : f32, size : f32, halflife : f32, strength : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+    fn place_radiation(&mut self, x : f32, y : f32, size : f32, halflife : f32, strength : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(Radiation::new(halflife, strength, size, size)), x, y, a, sender)
     }
 
-    fn place_nuke(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+    fn place_nuke(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(Nuke::new()), x, y, a, sender)
     }
 
-    fn place_fort(&mut self, x : f32, y : f32, a : f32, sender : Option<&mut Client>) -> u32 {
+    fn place_fort(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(Fort::new()), x, y, a, sender)
     }
 
-    fn place_air2air(&mut self, x : f32, y : f32, a : f32, target : u32, sender : Option<&mut Client>) -> u32 {
+    fn place_air2air(&mut self, x : f32, y : f32, a : f32, target : u32, sender : Option<usize>) -> u32 {
         self.place(Box::new(Air2Air::new(target)), x, y, a, sender)
     }
 
@@ -330,7 +330,7 @@ impl Server {
         }
     }
 
-    pub fn shoot(&mut self, bullet_type : BulletType, position : Vector2, velocity : Vector2, range : i32, sender : Option<&mut Client>) -> u32 {
+    pub fn shoot(&mut self, bullet_type : BulletType, position : Vector2, velocity : Vector2, range : i32, sender : Option<usize>) -> u32 {
         let bullet = self.place(match bullet_type {
             BulletType::Bullet => Box::new(Bullet::new()),
             BulletType::AntiRTF => Box::new(AntiRTFBullet::new())
@@ -500,10 +500,23 @@ impl Server {
                     command: 'd',
                     args: vec![self.objects[i].get_id().to_string()]
                 });
-                self.objects.remove(i as usize);
+                self.objects.remove(i);
                 continue; // don't allow it to reach the increment
             }
             i += 1;
+        }
+    }
+
+    fn delete_obj(&mut self, id : u32) {
+        match self.obj_lookup(id) {
+            Some (index) => {
+                self.broadcast(ProtocolMessage {
+                    command: 'd',
+                    args: vec![id.to_string()]
+                });
+                self.objects.remove(index);
+            },
+            None => {} // No need to do anything, the object already doesn't exist
         }
     }
 
@@ -659,16 +672,12 @@ impl Server {
         self.broadcast_tx.send(ClientCommand::ChatRoom (content, sender, priority, to_whom)).expect("Chat message failed");
     }
 
-    fn add(&mut self, mut piece : GamePieceBase, sender : Option<&mut Client>) -> u32 {
+    fn add(&mut self, mut piece : GamePieceBase, banner : Option<usize>) -> u32 {
         piece.set_id(self.top_id);
         self.top_id += 1;
-        if sender.is_some(){
-            piece.set_banner(sender.as_ref().unwrap().banner);
-            /*sender.as_mut().unwrap().send_protocol_message(ProtocolMessage {
-                command: 'a',
-                args: vec![piece.get_id().to_string()]
-            }).await;*/
-            self.broadcast_tx.send(ClientCommand::AttachToBanner (piece.get_id(), sender.unwrap().banner)).expect("Broadcast FAILED!");
+        if banner.is_some(){
+            piece.set_banner(banner.unwrap());
+            self.broadcast_tx.send(ClientCommand::AttachToBanner (piece.get_id(), banner.unwrap(), self.costs)).expect("Broadcast FAILED!");
         }
         self.broadcast(piece.get_new_message());
         let ret = piece.get_id();
@@ -1028,27 +1037,27 @@ impl Client {
                                     if !self.has_placed {
                                         self.has_placed = true;
                                         server.costs = false;
-                                        self.m_castle = Some(server.place_castle(x, y, self.mode == ClientMode::RealTimeFighter, Some(self)));
+                                        self.m_castle = Some(server.place_castle(x, y, self.mode == ClientMode::RealTimeFighter, Some(self.banner)));
                                         self.commandah.send(ServerCommand::LivePlayerInc (self.team, self.mode)).await.expect("Broadcast failed");
                                         match self.mode {
                                             ClientMode::Normal => {
-                                                server.place_basic_fighter(x - 200.0, y, PI, Some(self));
-                                                server.place_basic_fighter(x + 200.0, y, 0.0, Some(self));
-                                                server.place_basic_fighter(x, y - 200.0, 0.0, Some(self));
-                                                server.place_basic_fighter(x, y + 200.0, 0.0, Some(self));
+                                                server.place_basic_fighter(x - 200.0, y, PI, Some(self.banner));
+                                                server.place_basic_fighter(x + 200.0, y, 0.0, Some(self.banner));
+                                                server.place_basic_fighter(x, y - 200.0, 0.0, Some(self.banner));
+                                                server.place_basic_fighter(x, y + 200.0, 0.0, Some(self.banner));
                                                 self.collect(100).await;
                                             },
                                             ClientMode::RealTimeFighter => {
-                                                server.place_basic_fighter(x - 100.0, y, PI, Some(self));
-                                                server.place_basic_fighter(x + 100.0, y, 0.0, Some(self));
+                                                server.place_basic_fighter(x - 100.0, y, PI, Some(self.banner));
+                                                server.place_basic_fighter(x + 100.0, y, 0.0, Some(self.banner));
                                                 self.send_singlet('A').await;
                                                 self.a2a += 1;
                                             },
                                             ClientMode::Defense => {
-                                                server.place_basic_fighter(x - 200.0, y, PI, Some(self));
-                                                server.place_basic_fighter(x + 200.0, y, 0.0, Some(self));
-                                                server.place_turret(x, y - 200.0, 0.0, Some(self));
-                                                server.place_turret(x, y + 200.0, 0.0, Some(self));
+                                                server.place_basic_fighter(x - 200.0, y, PI, Some(self.banner));
+                                                server.place_basic_fighter(x + 200.0, y, 0.0, Some(self.banner));
+                                                server.place_turret(x, y - 200.0, 0.0, Some(self.banner));
+                                                server.place_turret(x, y + 200.0, 0.0, Some(self.banner));
                                                 self.collect(25).await;
                                             },
                                             _ => {
@@ -1063,32 +1072,32 @@ impl Client {
                                     }
                                 },
                                 "f" => {
-                                    server.place_basic_fighter(x, y, 0.0, Some(self));
+                                    server.place_basic_fighter(x, y, 0.0, Some(self.banner));
                                 },
                                 "w" => {
-                                    server.place_wall(x, y, Some(self));
+                                    server.place_wall(x, y, Some(self.banner));
                                 },
                                 "t" => {
-                                    server.place_tie_fighter(x, y, 0.0, Some(self));
+                                    server.place_tie_fighter(x, y, 0.0, Some(self.banner));
                                 },
                                 "s" => {
-                                    server.place_sniper(x, y, 0.0, Some(self));
+                                    server.place_sniper(x, y, 0.0, Some(self.banner));
                                 },
                                 "h" => {
-                                    server.place_missile(x, y, 0.0, Some(self));
+                                    server.place_missile(x, y, 0.0, Some(self.banner));
                                 },
                                 "T" => {
-                                    server.place_turret(x, y, 0.0, Some(self));
+                                    server.place_turret(x, y, 0.0, Some(self.banner));
                                 },
                                 "n" => {
-                                    server.place_nuke(x, y, 0.0, Some(self));
+                                    server.place_nuke(x, y, 0.0, Some(self.banner));
                                 },
                                 "F" => {
                                     match self.m_castle {
                                         Some(cid) => {
                                             match server.obj_lookup(cid) {
                                                 Some(index) => {
-                                                    let fort = server.place_fort(x, y, 0.0, Some(self));
+                                                    let fort = server.place_fort(x, y, 0.0, Some(self.banner));
                                                     server.objects[index].add_fort(fort);
                                                 }
                                                 None => {}
@@ -1098,13 +1107,13 @@ impl Client {
                                     }
                                 },
                                 "m" => {
-                                    server.place_mls(x, y, 0.0, Some(self));
+                                    server.place_mls(x, y, 0.0, Some(self.banner));
                                 },
                                 "a" => {
-                                    server.place_antirtf_missile(x, y, 0.0, Some(self));
+                                    server.place_antirtf_missile(x, y, 0.0, Some(self.banner));
                                 },
                                 "K" => {
-                                    server.place_carrier(x, y, 0.0, Some(self));
+                                    server.place_carrier(x, y, 0.0, Some(self.banner));
                                 },
                                 &_ => {
                                     message.poison("INVALID PLACE TYPE");
@@ -1198,7 +1207,7 @@ impl Client {
                                                             self.a2a -= 1;
                                                             let pos = server.objects[index].exposed_properties.physics.vector_position() + Vector2::new_from_manda(50.0, server.objects[index].exposed_properties.physics.angle());
                                                             let launchangle = server.objects[index].exposed_properties.physics.angle() - PI/2.0; // rust requires this to be explicit because of the dumbass borrow checker
-                                                            server.place_air2air(pos.x, pos.y, launchangle, numbah, Some(self));
+                                                            server.place_air2air(pos.x, pos.y, launchangle, numbah, Some(self.banner));
                                                         }
                                                     }
                                                     None => {}
@@ -1451,12 +1460,36 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                             moi.send_singlet('A').await;
                         }
                     },
-                    Ok (ClientCommand::AttachToBanner (id, banner)) => {
+                    Ok (ClientCommand::AttachToBanner (id, banner, does_cost)) => {
                         if banner == moi.banner {
-                            moi.send_protocol_message(ProtocolMessage {
-                                command: 'a',
-                                args: vec![id.to_string()]
-                            }).await;
+                            let mut reject : bool = false;
+                            if does_cost {
+                                let lock = server.lock().await;
+                                match lock.obj_lookup(id) {
+                                    Some (index) => {
+                                        if moi.score >= lock.objects[index].cost() {
+                                            moi.collect(-lock.objects[index].cost()).await;
+                                        }
+                                        else {
+                                            reject = true;
+                                        }
+                                    }
+                                    None => {
+                                        reject = true;
+                                    }
+                                }
+                            }
+                            if reject {
+                                println!("REJECTING OBJECT WE CAN'T AFFORD!");
+                                moi.commandah.send(ServerCommand::RejectObject (id)).await.expect("Failed!");
+                                break 'cliloop; // something nefarious happened; let's disconnect
+                            }
+                            else {
+                                moi.send_protocol_message(ProtocolMessage {
+                                    command: 'a',
+                                    args: vec![id.to_string()]
+                                }).await;
+                            }
                         }
                     }
                     //_ => {}
@@ -1537,7 +1570,8 @@ enum ServerCommand {
     LivePlayerDec (Option<usize>, ClientMode),
     Connect,
     Disconnect,
-    Broadcast (String)
+    Broadcast (String),
+    RejectObject (u32)
 }
 
 
@@ -1605,6 +1639,9 @@ async fn main(){
             match commandget.try_recv() {
                 Ok (ServerCommand::Start) => {
                     lawk.start();
+                },
+                Ok (ServerCommand::RejectObject (id)) => {
+                    lawk.delete_obj(id);
                 },
                 Ok (ServerCommand::Flip) => {
                     lawk.flip();

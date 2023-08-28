@@ -141,7 +141,7 @@ pub trait GamePiece {
         
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         0
     }
 
@@ -525,7 +525,7 @@ impl GamePieceBase {
         self.exposed_properties.id
     }
 
-    pub fn cost(&self) -> u32 {
+    pub fn cost(&self) -> i32 {
         self.piece.cost()
     }
 
@@ -652,7 +652,7 @@ impl GamePiece for Fort {
         PhysicsObject::new(0.0, 0.0, 10.0, 10.0, 0.0)
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         120
     }
 }

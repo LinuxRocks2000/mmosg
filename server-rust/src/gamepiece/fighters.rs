@@ -57,7 +57,7 @@ impl GamePiece for BasicFighter {
         id != 'c'
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         10
     }
 
@@ -98,7 +98,7 @@ impl GamePiece for TieFighter {
         id != 'c'
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         20
     }
 
@@ -139,7 +139,7 @@ impl GamePiece for Sniper {
         id != 'c'
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         30
     }
 
@@ -174,7 +174,7 @@ impl GamePiece for Missile {
         true
     }
 
-    fn cost(&self) -> u32 {
+    fn cost(&self) -> i32 {
         5
     }
 
