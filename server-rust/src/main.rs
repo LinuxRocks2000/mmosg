@@ -305,8 +305,9 @@ impl Server {
     }
 
     fn place_random_rubble(&mut self) { // Drop a random chest or wall (or something else, if I add other things)
-        let x = rand::random::<f32>() % self.gamesize;
-        let y = rand::random::<f32>() % self.gamesize;
+        let mut rng = rand::thread_rng();
+        let x = rng.gen_range(0.0..self.gamesize);
+        let y = rng.gen_range(0.0..self.gamesize);
         let chance = rand::random::<u8>() % 100;
         let thing : Box<dyn GamePiece + Send + Sync> = {
             if chance < 50 {
@@ -618,8 +619,9 @@ impl Server {
                 self.deal_with_objects();
                 self.place_timer -= 1;
                 if self.place_timer <= 0 {
-                    self.place_timer = rand::random::<u32>() % 200 + 50;
+                    self.place_timer = rand::random::<u32>() % 200 + 50; // set to 2 for object count benchmarking
                     self.place_random_rubble();
+                    println!("Object count: {}", self.objects.len());
                 }
             }
         }
@@ -649,7 +651,7 @@ impl Server {
 
     fn start(&mut self) {
         if self.mode == GameMode::Waiting {
-            for _ in 0..std::cmp::min(((self.gamesize * self.gamesize) / 1000000.0) as u32, 200) { // One per 1,000,000 square pixels, or 200, whichever is lower.
+            for _ in 0..((self.gamesize * self.gamesize) / 1000000.0) as u32 { // One per 1,000,000 square pixels, or 200, whichever is lower.
                 self.place_random_rubble();
             }
             self.set_mode(GameMode::Strategy);
@@ -1203,7 +1205,7 @@ impl Client {
                                             Some(castleid) => {
                                                 match server.obj_lookup(castleid) {
                                                     Some (index) => {
-                                                        if (server.objects[index].exposed_properties.physics.vector_position() - vec).magnitude() < 700.0 {
+                                                        if (server.objects[index].exposed_properties.physics.vector_position() - vec).magnitude() < 1500.0 {
                                                             self.a2a -= 1;
                                                             let pos = server.objects[index].exposed_properties.physics.vector_position() + Vector2::new_from_manda(50.0, server.objects[index].exposed_properties.physics.angle());
                                                             let launchangle = server.objects[index].exposed_properties.physics.angle() - PI/2.0; // rust requires this to be explicit because of the dumbass borrow checker
@@ -1347,16 +1349,16 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
     commandset.send(ServerCommand::Connect).await.unwrap();
     let mut receiver = broadcaster.subscribe();
     let (tx, mut rx) = websocket.split();
-    let mut moi = Client::new(tx, commandset);
+    let mut moi = Client::new(tx, commandset);/*
     if server.lock().await.passwordless {
         moi.send_singlet('p').await;
-    }
+    }*/
+    // passwordless broadcasts aren't really relevant any more
     'cliloop: loop {
         select! {
             insult = rx.next().fuse() => {
                 match insult {
                     Some(result) => {
-                        let serverlock = server.lock().await; // Lock the server before locking the client. This is the only way to ensure that both client and server aren't in use at the time and that the server can be safely used.
                         let msg = match result {
                             Ok(msg) => msg,
                             Err(e) => {
@@ -1379,6 +1381,7 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                             else {
                                 let p = ProtocolMessage::parse_string(text.to_string());
                                 if p.is_some() {
+                                    let serverlock = server.lock().await;
                                     moi.handle(p.unwrap() /* If it made it this far, there's data to unwrap */, serverlock).await;
                                     if moi.kys { // if it's decided to break the connection
                                         break 'cliloop;
