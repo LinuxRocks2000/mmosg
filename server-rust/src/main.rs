@@ -1247,12 +1247,15 @@ impl Client {
                                         match self.m_castle {
                                             Some(castleid) => {
                                                 match server.obj_lookup(castleid) {
-                                                    Some (index) => {
-                                                        if (server.objects[index].exposed_properties.physics.vector_position() - vec).magnitude() < 1500.0 {
+                                                    Some (castle) => {
+                                                        if (server.objects[castle].exposed_properties.physics.vector_position() - vec).magnitude() < 1500.0 {
                                                             self.a2a -= 1;
-                                                            let pos = server.objects[index].exposed_properties.physics.vector_position() + Vector2::new_from_manda(50.0, server.objects[index].exposed_properties.physics.angle());
-                                                            let launchangle = server.objects[index].exposed_properties.physics.angle() - PI/2.0; // rust requires this to be explicit because of the dumbass borrow checker
-                                                            server.place_air2air(pos.x, pos.y, launchangle, numbah, Some(self.banner));
+                                                            let off_ang = functions::coterminal(server.objects[castle].exposed_properties.physics.angle() - (server.objects[castle].exposed_properties.physics.vector_position() - vec).angle(), PI * 2.0);
+                                                            let pos = server.objects[castle].exposed_properties.physics.vector_position() + Vector2::new_from_manda(if off_ang > PI { 50.0 } else { -50.0 }, server.objects[castle].exposed_properties.physics.angle());
+                                                            let launchangle = server.objects[castle].exposed_properties.physics.angle() - PI/2.0; // rust requires this to be explicit because of the dumbass borrow checker
+                                                            let a2a_id = server.place_air2air(pos.x, pos.y, launchangle, numbah, Some(self.banner));
+                                                            let a2a_i = server.obj_lookup(a2a_id).unwrap(); // it's certain to exist
+                                                            server.objects[a2a_i].exposed_properties.physics.velocity = server.objects[castle].exposed_properties.physics.velocity;
                                                         }
                                                     }
                                                     None => {}

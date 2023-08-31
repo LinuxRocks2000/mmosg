@@ -75,7 +75,7 @@ impl Air2Air {
     pub fn new(tid : u32) -> Self {
         Self {
             target : tid,
-            count  : 15
+            count  : 5
         }
     }
 }
