@@ -115,7 +115,9 @@ pub struct Server {
     permit_npcs       : bool,
     port              : u16,
     sql               : String,
-    upg_costs         : HashMap<String, i32>
+    upg_costs         : HashMap<String, i32>,
+    worldzone_count   : usize,
+    zones             : Vec<Vec<usize>>
 }
 
 enum AuthState {
@@ -218,7 +220,7 @@ impl Server {
     fn place_block(&mut self, x : f32, y : f32, a : f32, w : f32, h : f32) { // No sender; blocks can't be placed by clients.
         let id = self.place(Box::new(Block::new()), x, y, a, None);
         let i = self.obj_lookup(id).expect("SOMETHING WENT TERRIBLY WRONG"); // in this case the object is guaranteed to exist by the time the lookup is performed, so unwrapping directly is safe.
-        self.objects[i].exposed_properties.physics.shape.w = w; // TODO: make this nicer
+        self.objects[i].exposed_properties.physics.shape.w = w;
         self.objects[i].exposed_properties.physics.shape.h = h;
         self.objects[i].exposed_properties.physics.set_cx(x);
         self.objects[i].exposed_properties.physics.set_cy(y);
@@ -272,8 +274,9 @@ impl Server {
         if self.living_players == 0 || self.isnt_rtf > 0 { // All RTF games will spawn NPCs
             return;
         }
-        let x = rand::random::<f32>() % self.gamesize;
-        let y = rand::random::<f32>() % self.gamesize;
+        let mut rng = rand::thread_rng();
+        let x = rng.gen_range(0.0..self.gamesize);
+        let y = rng.gen_range(0.0..self.gamesize);
         let chance = rand::random::<u8>() % 6;
         let thing : Box<dyn GamePiece + Send + Sync> = match chance {
             0 | 1 => {
@@ -337,7 +340,7 @@ impl Server {
             BulletType::AntiRTF => Box::new(AntiRTFBullet::new())
         }, position.x, position.y, velocity.angle(), sender);
         let i = self.obj_lookup(bullet).unwrap(); // it can be safely unwrapped because the object is guaranteed to exist at this point
-        self.objects[i].exposed_properties.physics.velocity = velocity; // TODO: make this nicer
+        self.objects[i].exposed_properties.physics.velocity = velocity;
         self.objects[i].exposed_properties.ttl = range;
         bullet
     }
@@ -356,115 +359,148 @@ impl Server {
         // Since carrying is a relatively rare operation, the wastefulness is not significant.
     }
 
-    fn deal_with_objects(&mut self) {
-        if self.objects.len() == 0 {
-            return;
+    fn deal_with_one_object(&mut self, x : usize, y : usize) {
+        if x == y {
+            println!("SYSTEM BROKE BECAUSE X EQUALS Y! CHECK YOUR MATH!");
         }
-        for x in 0..(self.objects.len() - 1) { // Go from first until the next-to-last item, because the inner loop goes from second to last.
-            for y in (x + 1)..self.objects.len() {
-                if x == y {
-                    println!("HANGING BECAUSE X EQUALS Y! CHECK YOUR MATH!");
+        if self.objects[x].exposed_properties.carrier_properties.is_carried || self.objects[y].exposed_properties.carrier_properties.is_carried {
+            return; // Never do any kind of collisions on carried objects.
+        }
+        let intasectah = self.objects[x].exposed_properties.physics.shape().intersects(self.objects[y].exposed_properties.physics.shape());
+        if intasectah.0 {
+            if self.objects[x].exposed_properties.carrier_properties.will_carry(self.objects[y].identify()) {
+                self.carry_tasks(x, y);
+                return;
+            }
+            if self.objects[y].exposed_properties.carrier_properties.will_carry(self.objects[x].identify()) {
+                self.carry_tasks(y, x);
+                return;
+            }
+            let mut is_collide = false;
+            if self.objects[x].get_does_collide(self.objects[y].identify()) {
+                let dmg = self.objects[y].get_collision_info().damage;
+                self.objects[x].damage(dmg);
+                if self.objects[x].dead() && (self.objects[y].get_banner() != self.objects[x].get_banner()) {
+                    /*let killah = self.get_client_by_banner(self.objects[y].get_banner()).await;
+                    if killah.is_some() {
+                        let amount = self.objects[x].capture().await as i32;
+                        killah.unwrap().lock().await.collect(amount).await;
+                    }*/
+                    self.broadcast_tx.send(ClientCommand::ScoreTo (self.objects[y].get_banner(), self.objects[x].capture() as i32)).expect("Broadcast failed");
+                    if self.objects[x].does_grant_a2a() {
+                        self.broadcast_tx.send(ClientCommand::GrantA2A (self.objects[y].get_banner())).expect("Broadcast failed part 2");
+                    }
                 }
-                if self.objects[x].exposed_properties.carrier_properties.is_carried || self.objects[y].exposed_properties.carrier_properties.is_carried {
-                    continue; // Never do any kind of collisions on carried objects.
+                is_collide = true;
+            }
+            if self.objects[y].get_does_collide(self.objects[x].identify()) {
+                let dmg = self.objects[x].get_collision_info().damage;
+                self.objects[y].damage(dmg);
+                if self.objects[y].dead() && (self.objects[y].get_banner() != self.objects[x].get_banner()) {
+                    /*let killah = self.get_client_by_banner(self.objects[x].get_banner()).await;
+                    if killah.is_some() {
+                        let amount = self.objects[y].capture().await as i32;
+                        killah.unwrap().lock().await.collect(amount).await;
+                    }*/
+                    self.broadcast_tx.send(ClientCommand::ScoreTo (self.objects[x].get_banner(), self.objects[y].capture() as i32)).expect("Broadcast failed");
+                    if self.objects[y].does_grant_a2a() {
+                        self.broadcast_tx.send(ClientCommand::GrantA2A (self.objects[x].get_banner())).expect("Broadcast failed part 2");
+                    }
                 }
-                let intasectah = self.objects[x].exposed_properties.physics.shape().intersects(self.objects[y].exposed_properties.physics.shape());
-                if intasectah.0 {
-                    if self.objects[x].exposed_properties.carrier_properties.will_carry(self.objects[y].identify()) {
-                        self.carry_tasks(x, y);
-                        continue;
-                    }
-                    if self.objects[y].exposed_properties.carrier_properties.will_carry(self.objects[x].identify()) {
-                        self.carry_tasks(y, x);
-                        continue;
-                    }
-                    let mut is_collide = false;
-                    if self.objects[x].get_does_collide(self.objects[y].identify()) {
-                        let dmg = self.objects[y].get_collision_info().damage;
-                        self.objects[x].damage(dmg);
-                        if self.objects[x].dead() && (self.objects[y].get_banner() != self.objects[x].get_banner()) {
-                            /*let killah = self.get_client_by_banner(self.objects[y].get_banner()).await;
-                            if killah.is_some() {
-                                let amount = self.objects[x].capture().await as i32;
-                                killah.unwrap().lock().await.collect(amount).await;
-                            }*/
-                            self.broadcast_tx.send(ClientCommand::ScoreTo (self.objects[y].get_banner(), self.objects[x].capture() as i32)).expect("Broadcast failed");
-                            if self.objects[x].does_grant_a2a() {
-                                self.broadcast_tx.send(ClientCommand::GrantA2A (self.objects[y].get_banner())).expect("Broadcast failed part 2");
-                            }
+                is_collide = true;
+            }
+            if is_collide {
+                if self.objects[x].exposed_properties.physics.solid || self.objects[y].exposed_properties.physics.solid {
+                    let sum = self.objects[y].exposed_properties.physics.velocity.magnitude() + self.objects[x].exposed_properties.physics.velocity.magnitude();
+                    let ratio = if sum == 0.0 {
+                        //self.objects[y].physics.mass / (self.objects[x].physics.mass + self.objects[y].physics.mass)
+                        if self.objects[y].exposed_properties.physics.mass < self.objects[x].exposed_properties.physics.mass {
+                            0.0
+                        } else {
+                            1.0
                         }
-                        is_collide = true;
                     }
-                    if self.objects[y].get_does_collide(self.objects[x].identify()) {
-                        let dmg = self.objects[x].get_collision_info().damage;
-                        self.objects[y].damage(dmg);
-                        if self.objects[y].dead() && (self.objects[y].get_banner() != self.objects[x].get_banner()) {
-                            /*let killah = self.get_client_by_banner(self.objects[x].get_banner()).await;
-                            if killah.is_some() {
-                                let amount = self.objects[y].capture().await as i32;
-                                killah.unwrap().lock().await.collect(amount).await;
-                            }*/
-                            self.broadcast_tx.send(ClientCommand::ScoreTo (self.objects[x].get_banner(), self.objects[y].capture() as i32)).expect("Broadcast failed");
-                            if self.objects[y].does_grant_a2a() {
-                                self.broadcast_tx.send(ClientCommand::GrantA2A (self.objects[x].get_banner())).expect("Broadcast failed part 2");
-                            }
+                    else {
+                        self.objects[x].exposed_properties.physics.velocity.magnitude() / sum
+                    };
+                    if !self.objects[x].exposed_properties.physics.fixed {
+                        self.objects[x].exposed_properties.physics.shape.translate(intasectah.1 * ratio); // I have no clue if this is correct but it works well enough
+                    }
+                    if !self.objects[y].exposed_properties.physics.fixed {
+                        self.objects[y].exposed_properties.physics.shape.translate(intasectah.1 * -1.0 * (1.0 - ratio));
+                    }
+                    if sum != 0.0 {
+                        // WIP real collisions - very complex, I don't know enough physics rn but am learning
+                        /*let m1 = self.objects[y].physics.mass;
+                        let m2 = self.objects[x].physics.mass;
+                        let total = m1 + m2;
+                        let merged = self.objects[y].physics.velocity * m1 + self.objects[x].physics.velocity * m2;
+                        self.objects[y].physics.velocity = (merged - ((self.objects[y].physics.velocity - self.objects[x].physics.velocity) * m2 * self.objects[y].physics.restitution)) / total;
+                        self.objects[x].physics.velocity = (merged - ((self.objects[x].physics.velocity - self.objects[y].physics.velocity) * m1 * self.objects[x].physics.restitution)) / total;*/
+                        // DUMB FULLY ELASTIC VERSION
+                        //self.objects[y].physics.velocity = (self.objects[y].physics.velocity * (m1 - m2) + self.objects[x].physics.velocity * 2.0 * m1) / total;
+                        //self.objects[x].physics.velocity = (self.objects[x].physics.velocity * (m2 - m1) + self.objects[y].physics.velocity * 2.0 * m2) / total;
+                        // DUMB OLD VERSION
+                        /*let (x_para, x_perp) = self.objects[x].physics.velocity.cut(intasectah.1);
+                        let (y_para, y_perp) = self.objects[y].physics.velocity.cut(intasectah.1);
+                        self.objects[y].physics.velocity = x_perp * (self.objects[y].physics.velocity.magnitude()/sum) + y_para; // add the old perpendicular component, allowing it to slide
+                        self.objects[x].physics.velocity = y_perp * (self.objects[x].physics.velocity.magnitude()/sum) + x_para;*/
+                        // VERY DUMB VERSION
+                        let m1 = self.objects[y].exposed_properties.physics.mass;
+                        let m2 = self.objects[x].exposed_properties.physics.mass;
+                        let total = m1 + m2;
+                        let (x_para, x_perp) = self.objects[x].exposed_properties.physics.velocity.cut(intasectah.1);
+                        let (y_para, y_perp) = self.objects[y].exposed_properties.physics.velocity.cut(intasectah.1);
+                        if !self.objects[y].exposed_properties.physics.fixed {
+                            self.objects[y].exposed_properties.physics.velocity = y_perp + x_para * (m2 / total);
                         }
-                        is_collide = true;
-                    }
-                    if is_collide {
-                        if self.objects[x].exposed_properties.physics.solid || self.objects[y].exposed_properties.physics.solid {
-                            let sum = self.objects[y].exposed_properties.physics.velocity.magnitude() + self.objects[x].exposed_properties.physics.velocity.magnitude();
-                            let ratio = if sum == 0.0 {
-                                //self.objects[y].physics.mass / (self.objects[x].physics.mass + self.objects[y].physics.mass)
-                                if self.objects[y].exposed_properties.physics.mass < self.objects[x].exposed_properties.physics.mass {
-                                    0.0
-                                } else {
-                                    1.0
-                                }
-                            }
-                            else {
-                                self.objects[x].exposed_properties.physics.velocity.magnitude() / sum
-                            };
-                            if !self.objects[x].exposed_properties.physics.fixed {
-                                self.objects[x].exposed_properties.physics.shape.translate(intasectah.1 * ratio); // I have no clue if this is correct but it works well enough
-                            }
-                            if !self.objects[y].exposed_properties.physics.fixed {
-                                self.objects[y].exposed_properties.physics.shape.translate(intasectah.1 * -1.0 * (1.0 - ratio));
-                            }
-                            if sum != 0.0 {
-                                // WIP real collisions - very complex, I don't know enough physics rn but am learning
-                                /*let m1 = self.objects[y].physics.mass;
-                                let m2 = self.objects[x].physics.mass;
-                                let total = m1 + m2;
-                                let merged = self.objects[y].physics.velocity * m1 + self.objects[x].physics.velocity * m2;
-                                self.objects[y].physics.velocity = (merged - ((self.objects[y].physics.velocity - self.objects[x].physics.velocity) * m2 * self.objects[y].physics.restitution)) / total;
-                                self.objects[x].physics.velocity = (merged - ((self.objects[x].physics.velocity - self.objects[y].physics.velocity) * m1 * self.objects[x].physics.restitution)) / total;*/
-                                // DUMB FULLY ELASTIC VERSION
-                                //self.objects[y].physics.velocity = (self.objects[y].physics.velocity * (m1 - m2) + self.objects[x].physics.velocity * 2.0 * m1) / total;
-                                //self.objects[x].physics.velocity = (self.objects[x].physics.velocity * (m2 - m1) + self.objects[y].physics.velocity * 2.0 * m2) / total;
-                                // DUMB OLD VERSION
-                                /*let (x_para, x_perp) = self.objects[x].physics.velocity.cut(intasectah.1);
-                                let (y_para, y_perp) = self.objects[y].physics.velocity.cut(intasectah.1);
-                                self.objects[y].physics.velocity = x_perp * (self.objects[y].physics.velocity.magnitude()/sum) + y_para; // add the old perpendicular component, allowing it to slide
-                                self.objects[x].physics.velocity = y_perp * (self.objects[x].physics.velocity.magnitude()/sum) + x_para;*/
-                                // VERY DUMB VERSION
-                                let m1 = self.objects[y].exposed_properties.physics.mass;
-                                let m2 = self.objects[x].exposed_properties.physics.mass;
-                                let total = m1 + m2;
-                                let (x_para, x_perp) = self.objects[x].exposed_properties.physics.velocity.cut(intasectah.1);
-                                let (y_para, y_perp) = self.objects[y].exposed_properties.physics.velocity.cut(intasectah.1);
-                                if !self.objects[y].exposed_properties.physics.fixed {
-                                    self.objects[y].exposed_properties.physics.velocity = y_perp + x_para * (m2 / total);
-                                }
-                                if !self.objects[x].exposed_properties.physics.fixed {
-                                    self.objects[x].exposed_properties.physics.velocity = x_perp + y_para * (m1 / total);
-                                }
-                            }
+                        if !self.objects[x].exposed_properties.physics.fixed {
+                            self.objects[x].exposed_properties.physics.velocity = x_perp + y_para * (m1 / total);
                         }
                     }
                 }
             }
         }
+    }
+
+    fn deal_with_objects(&mut self) {
+        if self.objects.len() == 0 { // shawty circuit
+            return;
+        }
+        if self.worldzone_count == 1 { // classic code if it's a one-zone world
+            for x in 0..(self.objects.len() - 1) { // Go from first until the next-to-last item, because the inner loop goes from second to last.
+                for y in (x + 1)..self.objects.len() {
+                    self.deal_with_one_object(x, y);
+                }
+            }
+        }
+        else {
+            let zonesize = self.gamesize / self.worldzone_count as f32;
+            for i in 0..self.objects.len() {
+                for x in 0..self.worldzone_count {
+                    for y in 0..self.worldzone_count {
+                        let zone_box = BoxShape::from_corners(x as f32 * zonesize, y as f32 * zonesize, (x as f32 + 1.0) * zonesize, (y as f32 + 1.0) * zonesize);
+                        if zone_box.intersects(self.objects[i].exposed_properties.physics.shape).0 {
+                            let zone = x + y * self.worldzone_count;
+                            if !self.zones[zone].contains(&i) {
+                                self.zones[zone].push(i);
+                            }
+                        }
+                    }
+                }
+            }
+            for zone in 0..self.zones.len() {
+                if self.zones[zone].len() > 1 { // if there's only one object in the zone, it can't hit anything, and if there are no objects...
+                    for x in 0..(self.zones[zone].len() - 1) {
+                        for y in (x + 1)..self.zones[zone].len() {
+                            self.deal_with_one_object(self.zones[zone][x], self.zones[zone][y]);
+                        }
+                    }
+                }
+                self.zones[zone].clear(); // doesn't actually deallocate, just sets len to 0.
+            }
+        }
+        // the new zones code CAUSES a bug where objects outside of the world boundary don't collide with anything.
     }
 
     fn send_physics_updates(&mut self) {
@@ -543,6 +579,9 @@ impl Server {
     }
 
     fn mainloop(&mut self) {
+        if self.authenticateds == 0 { // nothing happens if there isn't anyone for it to happen to
+            return;
+        }
         if self.mode == GameMode::Waiting {
             if self.is_io {
                 self.start();
@@ -621,7 +660,6 @@ impl Server {
                 if self.place_timer <= 0 {
                     self.place_timer = rand::random::<u32>() % 200 + 50; // set to 2 for object count benchmarking
                     self.place_random_rubble();
-                    println!("Object count: {}", self.objects.len());
                 }
             }
         }
@@ -1616,7 +1654,9 @@ async fn main(){
             ("f".to_string(), 70),
             ("h".to_string(), 150),
             ("s".to_string(), 40),
-        ])
+        ]),
+        worldzone_count     : 1,
+        zones               : Vec::new()
     };
     //rx.close().await;
     server.load_config();

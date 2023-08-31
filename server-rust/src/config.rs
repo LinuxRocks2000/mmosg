@@ -42,7 +42,8 @@ struct ServerConfigFile {
     permit_npcs     : Option<bool>,
     port            : Option<u16>,
     database        : Option<String>,
-    map_anchor      : Option<String>
+    map_anchor      : Option<String>,
+    zones           : Option<usize>
 }
 
 pub struct Config {
@@ -134,6 +135,16 @@ impl Config {
             Some(database_fname) => {
                 server.sql = database_fname.clone();
             },
+            _ => {}
+        }
+        match self.json.zones {
+            Some(zonecount) => {
+                server.worldzone_count = zonecount;
+                server.zones = Vec::with_capacity(zonecount * zonecount);
+                for _ in 0..(zonecount * zonecount) {
+                    server.zones.push(Vec::new());
+                }
+            }
             _ => {}
         }
     }

@@ -1,7 +1,7 @@
 use crate::vector::Vector2;
 use std::f32::consts::PI;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct BoxShape {
     pub x : f32,
     pub y : f32,
@@ -115,7 +115,7 @@ impl BoxShape {
         self.a += velocity;
     }
 
-    fn from_corners(x1 : f32, y1 : f32, x2 : f32, y2 : f32) -> Self {
+    pub fn from_corners(x1 : f32, y1 : f32, x2 : f32, y2 : f32) -> Self {
         Self {
             x : (x1 + x2) / 2.0,
             y : (y1 + y2) / 2.0,
@@ -159,7 +159,12 @@ impl BoxShape {
     }
 
     pub fn contains(&self, point : Vector2) -> bool {
-        let cmp = point.rotate_about(Vector2::new(self.x, self.y), -self.a);
+        let cmp = if self.a != 0.0 {
+            point.rotate_about(Vector2::new(self.x, self.y), -self.a)
+        }
+        else {
+            point
+        };
         cmp.x > self.x - self.w/2.0 && cmp.x < self.x + self.w/2.0 && cmp.y > self.y - self.h/2.0 && cmp.y < self.y + self.h/2.0
     }
 }
