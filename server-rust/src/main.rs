@@ -493,7 +493,12 @@ impl Server {
                 if self.zones[zone].len() > 1 { // if there's only one object in the zone, it can't hit anything, and if there are no objects...
                     for x in 0..(self.zones[zone].len() - 1) {
                         for y in (x + 1)..self.zones[zone].len() {
-                            self.deal_with_one_object(self.zones[zone][x], self.zones[zone][y]);
+                            if x == y {
+                                println("Something very bad happened");
+                            }
+                            else {
+                                self.deal_with_one_object(self.zones[zone][x], self.zones[zone][y]);
+                            }
                         }
                     }
                 }
