@@ -28,5 +28,6 @@
             "h": 200
         }
     ],
-    "headless": true
+    "headless": true,
+    "zones": 4
 }

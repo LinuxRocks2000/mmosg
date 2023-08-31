@@ -94,5 +94,6 @@
         "max_players": 100,
         "timeout": 1000
     },
-    "port": 3001
+    "port": 3001,
+    "zones": 4
 }
