@@ -494,7 +494,7 @@ impl Server {
                     for x in 0..(self.zones[zone].len() - 1) {
                         for y in (x + 1)..self.zones[zone].len() {
                             if x == y {
-                                println("Something very bad happened");
+                                println!("Something very bad happened");
                             }
                             else {
                                 self.deal_with_one_object(self.zones[zone][x], self.zones[zone][y]);
