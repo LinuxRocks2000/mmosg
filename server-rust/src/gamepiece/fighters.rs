@@ -5,7 +5,6 @@ use crate::Server;
 use crate::physics::PhysicsObject;
 use crate::vector::Vector2;
 use crate::ExposedProperties;
-use std::f32::consts::PI;
 
 
 pub struct BasicFighter {}
@@ -83,7 +82,7 @@ impl GamePiece for TieFighter {
     fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
         thing.shooter_properties.shoot = true;
         thing.shooter_properties.counter = 40;
-        thing.shooter_properties.angles = vec![0.0, PI];
+        thing.repeater.max_repeats = 1;
     }
 
     fn obtain_physics(&self) -> PhysicsObject {

@@ -52,6 +52,13 @@ pub enum BulletType {
     AntiRTF
 }
 
+#[derive(Clone, Copy)]
+pub struct RepeaterProperties {
+    repeats : u16,
+    max_repeats : u16,
+    repeat_cd : u32
+}
+
 
 #[derive(Debug)]
 pub enum ReqZone { // Placing zone.
@@ -102,6 +109,7 @@ pub struct ExposedProperties { // everything a GamePieceBase wants to expose to 
     pub goal_y             : f32,
     pub goal_a             : f32,
     pub ttl                : i32, // ttl of < 0 means ttl does nothing. ttl of 0 means die. ttl of anything higher means subtract one every update.
+    pub repeater           : RepeaterProperties
 }
 
 
@@ -234,6 +242,11 @@ impl GamePieceBase {
                     carrying : vec![],
                     does_accept : vec![],
                     is_carried : false
+                },
+                repeater : RepeaterProperties {
+                    repeats     : 0,
+                    max_repeats : 0,
+                    repeat_cd   : 5 // default, you don't usually have to touch this
                 }
             },
             broadcasts : vec![],
@@ -243,6 +256,7 @@ impl GamePieceBase {
         };
         thing.piece.construct(&mut thing.exposed_properties);
         thing.exposed_properties.health_properties.health = thing.exposed_properties.health_properties.max_health;
+        thing.exposed_properties.repeater.repeats = thing.exposed_properties.repeater.max_repeats;
         thing
     }
 
@@ -412,6 +426,13 @@ impl GamePieceBase {
                 if self.shoot_timer == 0 {
                     self.shoot_timer = self.exposed_properties.shooter_properties.counter;
                     self.shawty(self.exposed_properties.shooter_properties.range, server);
+                    if self.exposed_properties.repeater.repeats > 0 {
+                        self.exposed_properties.repeater.repeats -= 1;
+                        self.shoot_timer = self.exposed_properties.repeater.repeat_cd;
+                    }
+                    else {
+                        self.exposed_properties.repeater.repeats = self.exposed_properties.repeater.max_repeats;
+                    }
                 }
                 else {
                     self.shoot_timer -= 1;

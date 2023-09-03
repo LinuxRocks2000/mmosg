@@ -433,7 +433,7 @@ impl GamePiece for Radiation {
     fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
         let strength = (0.5_f32).powf(self.counter/self.halflife) * self.strength;
         self.counter += 1.0;
-        properties.collision_info.damage = strength/15.0;
+        properties.collision_info.damage = strength/12.0;
         server.broadcast(ProtocolMessage {
             command: 'r',
             args: vec![properties.id.to_string(), strength.to_string()]
@@ -451,8 +451,9 @@ impl GamePiece for Radiation {
 impl GamePiece for Nuke {
     fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
         thing.exploder = vec![
-            ExplosionMode::Radiation(100.0, 60.0, 0.7),
-            ExplosionMode::Radiation(600.0, 250.0, 0.2)
+            ExplosionMode::Radiation(200.0, 60.0, 0.3),
+            ExplosionMode::Radiation(1500.0, 250.0, 0.3),
+            ExplosionMode::Radiation(6000.0, 700.0, 0.3)
         ];
         thing.collision_info.damage = 0.0;
         thing.ttl = 500;
