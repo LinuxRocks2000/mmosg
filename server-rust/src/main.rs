@@ -10,9 +10,7 @@ pub mod gamepiece;
 pub mod config;
 pub mod functions;
 use crate::vector::Vector2;
-use futures_util::{SinkExt, StreamExt, stream::SplitSink};
-use warp::Filter;
-use warp::ws::{Message, WebSocket};
+use futures_util::{SinkExt, StreamExt};
 use std::vec::Vec;
 use tokio::sync::Mutex;
 use std::sync::Arc;
@@ -29,6 +27,9 @@ use futures::future::FutureExt; // for `.fuse()`
 use std::collections::HashMap;
 use tokio::select;
 use crate::gamepiece::BulletType;
+use protocol_v3::server::{WebSocketServer, WebSocketClientStream};
+use protocol_v3::protocol::ProtocolFrame;
+use protocol_v3::protocol_v3_macro::ProtocolFrame;
 
 const FPS : f32 = 30.0;
 
@@ -43,7 +44,7 @@ enum ClientMode {
 
 
 pub struct Client {
-    tx                : SplitSink<WebSocket, Message>,
+    socket            : WebSocketClientStream,
     is_authorized     : bool,
     score             : i32,
     has_placed        : bool,
@@ -56,6 +57,19 @@ pub struct Client {
     places_this_turn  : u8,
     kys               : bool,
     a2a               : u16
+}
+
+
+#[derive(ProtocolFrame)]
+enum ServerToClient {
+    Pong,
+    Tick (u32, u8), // counter, mode. mode can be 0 (play), 1 (strategy mode), or 2 (waiting).
+    HealthUpdate (usize, f32) // update the health for any object.
+}
+
+#[derive(ProtocolFrame)]
+enum ClientToServer {
+    Ping
 }
 
 
@@ -77,8 +91,7 @@ struct TeamData {
 
 #[derive(Debug, Clone)]
 enum ClientCommand { // Commands sent to clients
-    Send (ProtocolMessage),
-    //SendToTeam (ProtocolMessage, usize),
+    Send (ServerToClient),
     Tick (u32, String),
     ScoreTo (usize, i32),
     CloseAll,
@@ -511,12 +524,12 @@ impl Server {
     fn send_physics_updates(&mut self) {
         let mut i : usize = 0;
         while i < self.objects.len() {
-            let mut args_vec = vec![self.objects[i].get_id().to_string()];
+            //let mut args_vec = vec![self.objects[i].get_id().to_string()];
             let phys = self.objects[i].get_physics_object();
             if phys.translated() || phys.rotated() || phys.resized() {
-                args_vec.push(phys.cx().to_string());
-                args_vec.push(phys.cy().to_string());
+                self.broadcast(ServerToClient::MoveObjectFull (self.objects[i], phys.x, phys.y, phys.a, phys.w, phys.h));
             }
+            /*DON'T DELETE THIS
             if phys.rotated() || phys.resized() {
                 args_vec.push(phys.angle().to_string());
             }
@@ -525,11 +538,11 @@ impl Server {
                 args_vec.push(phys.height().to_string());
             }
             if args_vec.len() > 1 {
-                self.broadcast(ProtocolMessage {
+                self.broadcast(P rotocolMessage {
                     command: 'M',
                     args: args_vec
                 });
-            }
+            }*/
             unsafe {
                 (*(&mut self.objects as *mut Vec<GamePieceBase>))[i].update(self);
             }
@@ -538,10 +551,7 @@ impl Server {
                 unsafe {
                     (*(&mut self.objects as *mut Vec<GamePieceBase>))[i].die(self);
                 }
-                self.broadcast(ProtocolMessage {
-                    command: 'd',
-                    args: vec![self.objects[i].get_id().to_string()]
-                });
+                self.broadcast(ServerToClient::Delete (self.objects[i].get_id()));
                 self.objects.remove(i);
                 continue; // don't allow it to reach the increment
             }
@@ -552,10 +562,7 @@ impl Server {
     fn delete_obj(&mut self, id : u32) {
         match self.obj_lookup(id) {
             Some (index) => {
-                self.broadcast(ProtocolMessage {
-                    command: 'd',
-                    args: vec![id.to_string()]
-                });
+                self.broadcast(ServerToClient::Delete (id));
                 self.objects.remove(index);
             },
             None => {} // No need to do anything, the object already doesn't exist
@@ -570,10 +577,7 @@ impl Server {
         while i < self.objects.len() {
             let mut delted = false;
             if self.objects[i].get_banner() == banner {
-                self.broadcast(ProtocolMessage {
-                    command: 'd',
-                    args: vec![self.objects[i].get_id().to_string()]
-                });
+                self.broadcast(ServerToClient::Delete (self.objects[i].get_id()));
                 self.objects.remove(i);
                 delted = true;
             }
@@ -602,10 +606,7 @@ impl Server {
                     }
                     if is_has_moreteam {
                         self.autonomous.as_mut().unwrap().2 -= 1;
-                        self.broadcast(ProtocolMessage {
-                            command: '!',
-                            args: vec![self.autonomous.unwrap().2.to_string()]
-                        });
+                        self.broadcast(ServerToClient::Tick (self.autonomous.as_ref().unwrap().2, 2));
                         if self.autonomous.unwrap().2 <= 0 {
                             self.start();
                         }
@@ -626,10 +627,7 @@ impl Server {
             if !self.is_io {
                 if self.living_players == 0 {
                     println!("GAME ENDS WITH A TIE");
-                    self.broadcast(ProtocolMessage {
-                        command: 'T',
-                        args: vec![]
-                    });
+                    self.broadcast(ServerToClient::Tie);
                     println!("Tie broadcast complete.");
                     self.reset();
                 }
@@ -637,20 +635,14 @@ impl Server {
                     for team in &self.teams {
                         if team.live_count == self.living_players { // If one team holds all the players
                             println!("GAME ENDS WITH A WINNER");
-                            self.broadcast(ProtocolMessage {
-                                command: 'E',
-                                args: vec![team.banner_id.to_string()]
-                            });
+                            self.broadcast(ServerToClient::End (team.banner_id));
                             self.reset();
                             return;
                         }
                     }
                     if self.living_players == 1 {
                         println!("GAME ENDS WITH A WINNER");
-                        self.broadcast(ProtocolMessage {
-                            command: 'E',
-                            args: vec![self.winning_banner.to_string()]
-                        });
+                        self.broadcast(ServerToClient::End (self.winning_banner));
                         self.reset();
                     }
                 }
@@ -705,13 +697,9 @@ impl Server {
         }
     }
 
-    fn broadcast<'a>(&'a self, message : ProtocolMessage) {
-        self.broadcast_tx.send(ClientCommand::Send(message)).expect("Broadcast failed");
+    fn broadcast<'a>(&'a self, message : ServerToClient) {
+        self.broadcast_tx.send(ClientCommand::Send (message)).expect("Broadcast failed");
     }
-
-    /*fn broadcast_to_team<'a>(&'a self, message : ProtocolMessage, team : usize) {
-        self.broadcast_tx.send(ClientCommand::SendToTeam(message, team)).expect("Broadcast failed");
-    }*/
 
     fn chat(&self, content : String, sender : usize, priority : u8, to_whom : Option<usize>) {
         self.broadcast_tx.send(ClientCommand::ChatRoom (content, sender, priority, to_whom)).expect("Chat message failed");
@@ -766,11 +754,7 @@ impl Server {
             }
         }
         self.banners.push(banner.clone());
-        let message = ProtocolMessage {
-            command: 'b',
-            args
-        };
-        self.broadcast(message);
+        self.broadcast(ServerToClient::BannerAdd (banner, bannah.to_string()));
         bannah
     }
 
@@ -791,22 +775,17 @@ impl Server {
             let banner = &self.banners[index];
             let team = self.get_team_of_banner(index);
             println!("Team: {:?}", team);
-            let mut args = vec![index.to_string(), banner.to_string()];
             if team.is_some(){
-                args.push(self.teams[team.unwrap()].banner_id.to_string());
+                user.send_protocol_message(ServerToClient::BannerAddToTeam (index, banner, team.unwrap().banner).await);
             }
-            user.send_protocol_message(ProtocolMessage {
-                command: 'b',
-                args
-            }).await;
+            else {
+                user.send_protocol_message(ServerToClient::BannerAdd (index, banner).await);
+            }
         }
         for piece in &self.objects {
             user.send_protocol_message(piece.get_new_message()).await;
         }
-        user.send_protocol_message(ProtocolMessage { // m also doubles as a "you have all the data" message
-            command: 'm',
-            args: vec![self.gamesize.to_string(), self.terrain_seed.to_string()]
-        }).await;
+        user.send_protocol_message(ServerToClient::Metadata (self.gamesize.to_string(), self.terrain_seed.to_string())).await;
     }
 
     async fn user_logged_in(&mut self, user : &mut Client) {
@@ -861,81 +840,10 @@ impl Server {
 }
 
 
-#[derive(Debug, Clone)]
-pub struct ProtocolMessage {
-    command : char,
-    args    : Vec<String>
-}
-
-
-impl ProtocolMessage {
-    /*fn singlet(command : char) -> ProtocolMessage {
-        ProtocolMessage {
-            command,
-            args: vec![]
-        }
-    }*/
-
-    fn parse_string(message : String) -> Option<Self> {
-        let characters : Vec<char> = message.chars().collect();
-        let command = characters[0];
-        let mut args = vec![];
-        let mut buffer : String = String::new();
-        let mut i = 1;
-        while i < characters.len() {
-            let arg_end : u32 = i as u32 + characters[i] as u32;
-            if arg_end >= characters.len() as u32{
-                println!("[ WARNING ] Some idiot is trying to broadcast poison frames!");
-                return None;
-            }
-            while i < arg_end as usize {
-                i += 1;
-                buffer.push(characters[i]);
-            }
-            i += 1;
-            args.push(buffer.clone());
-            buffer.clear();
-        }
-        Some(Self {
-            command, args
-        })
-    }
-
-    fn encode(&self) -> String {
-        let mut r = String::new();
-        r.push(self.command);
-        for arg in &self.args {
-            r.push(char::from_u32(arg.len() as u32).unwrap());
-            r += &arg;
-        }
-        r
-    }
-
-    fn poison(&self, problem : &str) {
-        println!("The client is poisoning us with {} ({})", self, problem);
-    }
-}
-
-
-impl fmt::Display for ProtocolMessage {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut thang = String::new();
-        thang.push(self.command);
-        thang += " with [";
-        for arg in &self.args {
-            thang += &arg;
-            thang += ", ";
-        }
-        thang += "]";
-        write!(f, "{}", thang)
-    }
-}
-
-
 impl Client {
-    fn new(tx : SplitSink<WebSocket, Message>, commandah : tokio::sync::mpsc::Sender<ServerCommand>) -> Self {
+    fn new(socket : WebSocketClientStream, commandah : tokio::sync::mpsc::Sender<ServerCommand>) -> Self {
         Self {
-            tx,
+            socket,
             is_authorized: false,
             score: 0,
             has_placed: false,
@@ -951,53 +859,17 @@ impl Client {
         }
     }
 
-    async fn send_text(&mut self, text : &str) {
-        match self.tx.send(Message::text(text)).await {
-            Ok(_) => {}
-            Err(_) => {
-                println!("COULD NOT SEND A MESSAGE? This may be a borked pipe or summat'. Probably not fatal.");
-            }
-        }
-    }
-
     async fn collect(&mut self, amount : i32) {
         self.score += amount;
-        self.send_protocol_message(ProtocolMessage {
-            command: 'S',
-            args: vec![self.score.to_string()]
-        }).await;
+        self.send_protocol_message(ServerToClient::SetScore(self.score)).await;
     }
 
-    async fn send_protocol_message(&mut self, message : ProtocolMessage) {
-        self.send_text(&(message.encode())).await;
-    }
-
-    async fn send_error(&mut self, error : u32) {
-        self.send_protocol_message(ProtocolMessage {
-            command: 'e',
-            args: vec![error.to_string()]
-        }).await;
-    }
-
-    async fn send_warning(&mut self, warning : u32) {
-        self.send_protocol_message(ProtocolMessage {
-            command: 'w',
-            args: vec![warning.to_string()]
-        }).await;
-    }
-
-    async fn send_singlet(&mut self, thing : char) {
-        self.send_protocol_message(ProtocolMessage {
-            command: thing,
-            args: vec![]
-        }).await;
+    async fn send_protocol_message(&mut self, message : ServerToClient) {
+        self.socket.send(message);
     }
 
     async fn retaliate_from_poison(&mut self) {
-        self.send_protocol_message(ProtocolMessage {
-            command: '-',
-            args: vec!["Your poisoning attempts have FAILED. EAT DISCONNECT!".to_string()]
-        }).await;
+        self.send_protocol_message(ServerToClient::Broadcast ("KILL yourself", 0, 6)).await;
         self.kys = true;
         println!("Retaliating");
     }
@@ -1357,10 +1229,7 @@ impl Client {
                                 break;
                             }
                         }
-                        server.broadcast(ProtocolMessage {
-                            command: 'u',
-                            args: vec![id.to_string(), message.args[1].clone()]
-                        });
+                        server.broadcast(ClientCommand::AddUpgrade(id, message.args[1].clone()));
                     }
                     else { // something nefarious is going on!
                         self.kys = true;
@@ -1391,18 +1260,17 @@ impl Client {
 }
 
 
-async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcaster : tokio::sync::broadcast::Sender<ClientCommand>, commandset : tokio::sync::mpsc::Sender<ServerCommand>){
+async fn got_client(client : WebSocketClientStream, server : Arc<Mutex<Server>>, broadcaster : tokio::sync::broadcast::Sender<ClientCommand>, commandset : tokio::sync::mpsc::Sender<ServerCommand>){
     commandset.send(ServerCommand::Connect).await.unwrap();
     let mut receiver = broadcaster.subscribe();
-    let (tx, mut rx) = websocket.split();
-    let mut moi = Client::new(tx, commandset);/*
+    let mut moi = Client::new(commandset);/*
     if server.lock().await.passwordless {
         moi.send_singlet('p').await;
     }*/
     // passwordless broadcasts aren't really relevant any more
     'cliloop: loop {
         select! {
-            insult = rx.next().fuse() => {
+            insult = client.read().fuse() => {
                 match insult {
                     Some(result) => {
                         let msg = match result {
@@ -1420,9 +1288,6 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                             };
                             if text == "_"{
                                 moi.send_text("_").await;
-                            }
-                            else if text == "HELLO MMOSG" {
-                                moi.send_text("HELLO MMOSG").await;
                             }
                             else {
                                 let p = ProtocolMessage::parse_string(text.to_string());
@@ -1462,10 +1327,7 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                                 None => {}
                             }
                         }
-                        moi.send_protocol_message(ProtocolMessage {
-                            command: 't',
-                            args
-                        }).await;
+                        moi.send_protocol_message(ServerToClient::Tick).await;
                         if !moi.is_alive(schlock) {
                             if moi.m_castle.is_some() {
                                 moi.m_castle = None;
@@ -1485,11 +1347,6 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                     Ok (ClientCommand::ScoreTo (banner, amount)) => {
                         if moi.banner == banner {
                             moi.collect(amount).await;
-                            /*moi.score += amount;
-                            moi.send_protocol_message(ProtocolMessage {
-                                command: 'S',
-                                args: vec![moi.score.to_string()]
-                            }).await;*/
                         }
                     },
                     Ok (ClientCommand::CloseAll) => {
@@ -1497,16 +1354,13 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                     },
                     Ok (ClientCommand::ChatRoom (content, sender, priority, target)) => {
                         if target.is_none() || target == moi.team {
-                            moi.send_protocol_message(ProtocolMessage {
-                                command: 'B',
-                                args: vec![content, sender.to_string(), priority.to_string()]
-                            }).await;
+                            moi.send_protocol_message(ServerToClient::ChatRoom(content, sender, priority));
                         }
                     },
                     Ok (ClientCommand::GrantA2A (to)) => {
                         if to == moi.banner && moi.mode == ClientMode::RealTimeFighter {
                             moi.a2a += 1;
-                            moi.send_singlet('A').await;
+                            moi.send_protocol_message(ServerToClient::EquipA2A);
                         }
                     },
                     Ok (ClientCommand::AttachToBanner (id, banner, does_cost)) => {
@@ -1534,10 +1388,7 @@ async fn got_client(websocket : WebSocket, server : Arc<Mutex<Server>>, broadcas
                                 break 'cliloop; // something nefarious happened; let's disconnect
                             }
                             else {
-                                moi.send_protocol_message(ProtocolMessage {
-                                    command: 'a',
-                                    args: vec![id.to_string()]
-                                }).await;
+                                moi.send_protocol_message(ServerToClient::Add (id)).await;
                             }
                         }
                     }
@@ -1721,10 +1572,7 @@ async fn main(){
                 },
                 Ok (ServerCommand::PasswordlessToggle) => {
                     lawk.passwordless = !lawk.passwordless;
-                    lawk.broadcast(ProtocolMessage {
-                        command: 'p',
-                        args: vec![]
-                    });
+                    lawk.broadcast(SetPasswordless (lawk.passwordless));
                     println!("Set passwordless mode to {}", lawk.passwordless);
                 },
                 Ok(ServerCommand::LivePlayerInc (team, mode)) => {
@@ -1816,21 +1664,10 @@ async fn main(){
         });
     }
 
-    let servah = warp::any().map(move || server_mutex.clone());
-    let websocket = warp::path("game")
-        .and(warp::ws())
-        .and(servah)
-        .and(warp::any().map(move || broadcast_tx.clone()))
-        .and(warp::any().map(move || commandset_clone.clone())) // dumbest line in the history of rust
-        .map(|ws : warp::ws::Ws, servah, sendah, commandset| {
-            ws.on_upgrade(move |websocket| got_client(websocket, servah, sendah, commandset))
-        });
-    let stat = warp::any()
-        .and(warp::fs::dir("../"));
-    
-    let routes = stat.or(websocket);
-
-    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+    let websocket_server = WebSocketServer::new(3000, "MMOSG".to_string()).await;
+    loop {
+        tokio::task::spawn(got_client(websocket_server.accept::<ClientToServer, ServerToClient>().await, server_mutex.clone(), broadcast_tx.clone(), commandset.clone()));
+    }
 }
 
 
