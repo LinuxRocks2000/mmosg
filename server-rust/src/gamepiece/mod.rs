@@ -1,6 +1,6 @@
 // Gamepiece code
 use crate::physics::*;
-use crate::ProtocolMessage;
+use crate::ServerToClient;
 use crate::Server;
 use std::f32::consts::PI;
 use crate::vector::Vector2;
@@ -176,6 +176,10 @@ pub trait GamePiece {
     fn does_grant_a2a(&self) -> bool {
         false
     }
+
+    fn do_stream_health(&self) -> bool {
+        false
+    }
 }
 
 
@@ -189,9 +193,9 @@ pub struct GamePieceBase {
     pub exposed_properties : ExposedProperties,
     pub piece              : Box<dyn GamePiece + Send + Sync>, // public because the server has to touch it on occasion
     pub shoot_timer        : u32,
-    broadcasts             : Vec<ProtocolMessage>,
+    broadcasts             : Vec<ServerToClient>,
     forts                  : Vec<u32>,
-    upgrades               : Vec<Arc<String>>
+    pub upgrades           : Vec<Arc<String>>
 }
 
 use tokio::sync::Mutex; // LET THE WARNING ON THIS LINE FOREVER BE A TROPHY OF OUR VICTORY AGAINST MUTEXES
@@ -347,7 +351,7 @@ impl GamePieceBase {
         }
     }
 
-    pub fn broadcast(&mut self, message : ProtocolMessage) {
+    pub fn broadcast(&mut self, message : ServerToClient) {
         self.broadcasts.push(message);
     }
 
@@ -509,25 +513,18 @@ impl GamePieceBase {
         self.exposed_properties.collision_info
     }
 
-    pub fn get_new_message(&self) -> ProtocolMessage {
-        let mut args = vec![
-            self.identify().to_string(),
-            self.get_id().to_string(),
-            self.exposed_properties.physics.cx().to_string(),
-            self.exposed_properties.physics.cy().to_string(),
-            self.exposed_properties.physics.angle().to_string(),
-            (if self.is_editable() { 1 } else { 0 }).to_string(),
-            self.get_banner().to_string(),
-            self.exposed_properties.physics.width().to_string(),
-            self.exposed_properties.physics.height().to_string()
-        ];
-        for upg in &self.upgrades {
-            args.push(String::clone(&upg));
-        }
-        ProtocolMessage {
-            command: 'n',
-            args
-        }
+    pub fn get_new_message(&self) -> ServerToClient {
+        ServerToClient::New (
+            self.get_id(),
+            self.identify() as u8,
+            self.exposed_properties.physics.cx(),
+            self.exposed_properties.physics.cy(),
+            self.exposed_properties.physics.angle(),
+            self.is_editable(),
+            self.get_banner() as u32,
+            self.exposed_properties.physics.width(),
+            self.exposed_properties.physics.height()
+        )
     }
 
     pub fn get_banner(&self) -> usize {
@@ -548,6 +545,14 @@ impl GamePieceBase {
 
     pub fn cost(&self) -> i32 {
         self.piece.cost()
+    }
+
+    pub fn get_health_perc(&self) -> f32 {
+        self.exposed_properties.health_properties.health/self.exposed_properties.health_properties.max_health
+    }
+
+    pub fn do_stream_health(&self) -> bool {
+        self.piece.do_stream_health()
     }
 
     pub fn capture(&self) -> u32 {
@@ -599,6 +604,10 @@ impl GamePiece for Castle {
         else{
             PhysicsObject::new(0.0, 0.0, 50.0, 50.0, 0.0)
         }
+    }
+
+    fn do_stream_health(&self) -> bool {
+        true
     }
 
     fn req_zone(&self) -> ReqZone {

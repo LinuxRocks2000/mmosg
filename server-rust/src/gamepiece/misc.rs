@@ -5,7 +5,7 @@ use crate::physics::PhysicsObject;
 use super::TargetingFilter;
 use super::TargetingMode;
 use super::ExplosionMode;
-use crate::ProtocolMessage;
+use crate::ServerToClient;
 use crate::vector::Vector2;
 use super::BulletType;
 use crate::functions::*;
@@ -434,10 +434,7 @@ impl GamePiece for Radiation {
         let strength = (0.5_f32).powf(self.counter/self.halflife) * self.strength;
         self.counter += 1.0;
         properties.collision_info.damage = strength/12.0;
-        server.broadcast(ProtocolMessage {
-            command: 'r',
-            args: vec![properties.id.to_string(), strength.to_string()]
-        });
+        server.broadcast(ServerToClient::Radiate (properties.id, strength));
         if strength < 0.01 {
             properties.health_properties.health = 0.0;
         }

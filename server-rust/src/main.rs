@@ -10,12 +10,10 @@ pub mod gamepiece;
 pub mod config;
 pub mod functions;
 use crate::vector::Vector2;
-use futures_util::{SinkExt, StreamExt};
 use std::vec::Vec;
 use tokio::sync::Mutex;
 use std::sync::Arc;
 use crate::gamepiece::*;
-use std::fmt;
 use std::f32::consts::PI;
 use rand::Rng;
 use crate::gamepiece::fighters::*;
@@ -24,7 +22,6 @@ use crate::gamepiece::npc;
 use crate::physics::BoxShape;
 use crate::config::Config;
 use futures::future::FutureExt; // for `.fuse()`
-use std::collections::HashMap;
 use tokio::select;
 use crate::gamepiece::BulletType;
 use protocol_v3::server::{WebSocketServer, WebSocketClientStream};
@@ -56,20 +53,52 @@ pub struct Client {
     is_team_leader    : bool,
     places_this_turn  : u8,
     kys               : bool,
-    a2a               : u16
+    a2a               : u16,
+    walls_remaining   : u16,
+    walls_cap         : u16
 }
 
 
-#[derive(ProtocolFrame)]
-enum ServerToClient {
+#[derive(ProtocolFrame, Debug, Clone)]
+pub enum ServerToClient {
     Pong,
     Tick (u32, u8), // counter, mode. mode can be 0 (play), 1 (strategy mode), or 2 (waiting).
-    HealthUpdate (usize, f32) // update the health for any object.
+    HealthUpdate (u32, f32), // update the health for any object.
+    SetPasswordless (bool), 
+    BannerAdd (u32, String), // banner id, banner text
+    BannerAddToTeam (u32, u32), // banner we're adding to a team, team banner.
+    End (u32), // banner that won: this can be a team.
+    Metadata (f32, u32),
+    SetScore (i32),
+    Chat (String, u32, u8), // message, sender, priority
+    BadPassword,
+    Welcome,
+    YouAreSpectating,
+    YouAreTeamLeader,
+    A2A (u16), // send the client the how many A2A weapons it has
+    UpgradeThing (u32, String),
+    YouLose,
+    Add (u32),
+    Radiate (u32, f32),
+    New (u32, u8, f32, f32, f32, bool, u32, f32, f32), // id, type, x, y, a, editable, banner, w, h
+    MoveObjectFull (u32, f32, f32, f32, f32, f32), // id, x, y, a, w, h. inefficient (25 bytes altogether); use a smaller one like MoveObjectXY or MoveObjectA or MoveObjectXYA if possible.
+    Delete (u32),
+    Tie
 }
 
-#[derive(ProtocolFrame)]
-enum ClientToServer {
-    Ping
+#[derive(ProtocolFrame, Debug, Clone)]
+pub enum ClientToServer {
+    Ping,
+    Connect (String, String, String), // password, banner, mode
+    Place (f32, f32, u8),
+    Cost (i32),
+    Move (u32, f32, f32, f32),
+    LaunchA2A (u32),
+    PilotRTF (bool, bool, bool, bool, bool),
+    Chat (String, bool), // the bool is if it's sent to everyone or not
+    UpgradeThing (u32, String),
+    SelfTest (bool, u8, u16, u32, i32, f32, String),
+    Shop (u8)
 }
 
 
@@ -92,7 +121,7 @@ struct TeamData {
 #[derive(Debug, Clone)]
 enum ClientCommand { // Commands sent to clients
     Send (ServerToClient),
-    Tick (u32, String),
+    Tick (u32, u8),
     ScoreTo (usize, i32),
     CloseAll,
     ChatRoom (String, usize, u8, Option<usize>), // message, sender, priority
@@ -128,7 +157,6 @@ pub struct Server {
     permit_npcs       : bool,
     port              : u16,
     sql               : String,
-    upg_costs         : HashMap<String, i32>,
     worldzone_count   : usize,
     zones             : Vec<Vec<usize>>
 }
@@ -167,6 +195,16 @@ impl Server {
             }
         }
         return false;
+    }
+
+    async fn upgrade_thing_to(&mut self, thing : u32, upgrade : String) {
+        for object in &mut self.objects {
+            if object.get_id() == thing {
+                object.upgrade(upgrade.clone());
+                self.broadcast(ServerToClient::UpgradeThing (thing, upgrade));
+                break;
+            }
+        }
     }
 
     fn is_clear(&self, x : f32, y : f32) -> bool {
@@ -525,9 +563,11 @@ impl Server {
         let mut i : usize = 0;
         while i < self.objects.len() {
             //let mut args_vec = vec![self.objects[i].get_id().to_string()];
+            let id = self.objects[i].get_id();
             let phys = self.objects[i].get_physics_object();
             if phys.translated() || phys.rotated() || phys.resized() {
-                self.broadcast(ServerToClient::MoveObjectFull (self.objects[i], phys.x, phys.y, phys.a, phys.w, phys.h));
+                let command = ServerToClient::MoveObjectFull (id, phys.shape.x, phys.shape.y, phys.shape.a, phys.shape.w, phys.shape.h);
+                self.broadcast(command);
             }
             /*DON'T DELETE THIS
             if phys.rotated() || phys.resized() {
@@ -635,14 +675,14 @@ impl Server {
                     for team in &self.teams {
                         if team.live_count == self.living_players { // If one team holds all the players
                             println!("GAME ENDS WITH A WINNER");
-                            self.broadcast(ServerToClient::End (team.banner_id));
+                            self.broadcast(ServerToClient::End (team.banner_id as u32));
                             self.reset();
                             return;
                         }
                     }
                     if self.living_players == 1 {
                         println!("GAME ENDS WITH A WINNER");
-                        self.broadcast(ServerToClient::End (self.winning_banner));
+                        self.broadcast(ServerToClient::End (self.winning_banner as u32));
                         self.reset();
                     }
                 }
@@ -650,7 +690,11 @@ impl Server {
             if self.mode == GameMode::Play {
                 self.send_physics_updates();
             }
-            self.broadcast_tx.send(ClientCommand::Tick (self.counter, (if self.mode == GameMode::Strategy { "1" } else { "0" }).to_string())).expect("Broadcast failed");
+            self.broadcast_tx.send(ClientCommand::Tick (self.counter, match self.mode {
+                GameMode::Play => 0,
+                GameMode::Strategy => 1,
+                GameMode::Waiting => 2
+            })).expect("Broadcast failed");
             if self.mode == GameMode::Play {
                 self.deal_with_objects();
                 self.place_timer -= 1;
@@ -744,17 +788,16 @@ impl Server {
             banner = Arc::new(banner.to_string() + ".copy");
         }
         let bannah = self.banners.len();
-        let mut args = vec![bannah.to_string(), banner.to_string()];
         println!("Created new banner {}, {}", self.banners.len(), banner);
+        self.broadcast(ServerToClient::BannerAdd (bannah as u32, banner.to_string()));
         if dispatcha.is_some() {
             dispatcha.as_mut().unwrap().banner = self.banners.len();
             println!("Added the banner to a client");
             if dispatcha.as_ref().unwrap().team.is_some() {
-                args.push(self.teams[dispatcha.as_ref().unwrap().team.unwrap()].banner_id.to_string());
+                self.broadcast(ServerToClient::BannerAddToTeam (bannah as u32, self.teams[dispatcha.as_ref().unwrap().team.unwrap()].banner_id as u32));
             }
         }
         self.banners.push(banner.clone());
-        self.broadcast(ServerToClient::BannerAdd (banner, bannah.to_string()));
         bannah
     }
 
@@ -775,17 +818,19 @@ impl Server {
             let banner = &self.banners[index];
             let team = self.get_team_of_banner(index);
             println!("Team: {:?}", team);
+            user.send_protocol_message(ServerToClient::BannerAdd (index as u32, banner.to_string())).await;
             if team.is_some(){
-                user.send_protocol_message(ServerToClient::BannerAddToTeam (index, banner, team.unwrap().banner).await);
-            }
-            else {
-                user.send_protocol_message(ServerToClient::BannerAdd (index, banner).await);
+                user.send_protocol_message(ServerToClient::BannerAddToTeam (index as u32, self.teams[team.unwrap()].banner_id as u32)).await;
             }
         }
         for piece in &self.objects {
             user.send_protocol_message(piece.get_new_message()).await;
+            for i in 0..piece.upgrades.len() {
+                let upg = piece.upgrades[i].to_string();
+                user.send_protocol_message(ServerToClient::UpgradeThing(piece.get_id(), upg)).await;
+            }
         }
-        user.send_protocol_message(ServerToClient::Metadata (self.gamesize.to_string(), self.terrain_seed.to_string())).await;
+        user.send_protocol_message(ServerToClient::Metadata (self.gamesize, self.terrain_seed)).await;
     }
 
     async fn user_logged_in(&mut self, user : &mut Client) {
@@ -855,7 +900,9 @@ impl Client {
             is_team_leader: false,
             places_this_turn: 0,
             kys: false,
-            a2a: 0
+            a2a: 0,
+            walls_cap : 2,
+            walls_remaining : 4 // you get a bonus on turn 1
         }
     }
 
@@ -865,233 +912,144 @@ impl Client {
     }
 
     async fn send_protocol_message(&mut self, message : ServerToClient) {
-        self.socket.send(message);
-    }
-
-    async fn retaliate_from_poison(&mut self) {
-        self.send_protocol_message(ServerToClient::Broadcast ("KILL yourself", 0, 6)).await;
-        self.kys = true;
-        println!("Retaliating");
-    }
-
-    async fn handle(&mut self, message : ProtocolMessage, mut server : tokio::sync::MutexGuard<'_, Server>) {
-        if message.command == 'c' && !self.is_authorized {
-            if server.new_user_can_join() {
-                let lockah = server.authenticate(message.args[0].clone(), message.args[2] == "spectator");
-                match lockah { // If you condense this, for === RUST REASONS === it keeps the mutex locked.
-                    AuthState::Error => {
-                        println!("New user has invalid password!");
-                        self.send_error(0).await;
-                        return;
-                    },
-                    AuthState::Single => {
-                        println!("New user has authenticated as single player");
-                        self.send_singlet('s').await;
-                        server.user_logged_in(self).await;
-                        server.banner_add(Some(self), Arc::new(message.args[1].clone()));
-                        self.is_authorized = true;
-                    },
-                    AuthState::Team (team, tl) => {
-                        println!("New user has authenticated as player in team {}", server.banners[server.teams[team].banner_id]);
-                        self.team = Some(team);
-                        self.send_singlet('s').await;
-                        if tl {
-                            self.send_singlet('?').await;
-                            self.is_team_leader = true;
-                        }
-                        server.user_logged_in(self).await;
-                        server.banner_add(Some(self), Arc::new(message.args[1].clone()));
-                        server.teams[team].members.push(self.banner);
-                        self.is_authorized = true;
-                    },
-                    AuthState::Spectator => {
-                        println!("Spectator joined!");
-                        self.send_warning(0).await;
-                        server.spectator_joined(self).await;
-                    }
-                }
-                self.mode = match message.args[2].as_str() {
-                    "normal" => ClientMode::Normal,
-                    "defender" => ClientMode::Defense,
-                    "rtf" => ClientMode::RealTimeFighter,
-                    _ => ClientMode::Normal
-                };
-            }
-            else {
-                println!("New user can't join!");
-                self.send_warning(0).await;
-                server.spectator_joined(self).await;
-            }
+        match self.socket.send(message).await { // unwrap the error; it isn't important here
+            _ => {}
         }
-        else if self.is_authorized {
-            match message.command {
-                'p' => {
-                    if message.args.len() == 3 {
-                        if self.places_this_turn >= 30 {
-                            return;
-                        }
-                        if server.mode != GameMode::Strategy && message.args[0] != "c"{ // if it is trying to place an object, but it isn't strat mode and it isn't placing a castle
-                            message.poison("CLIENT IS ATTEMPTING TO PLACE AN OBJECT OUTSIDE OF STRATEGY MODE");
-                            // originally, this retaliated, but now it just refuses. the retaliation was a problem.
-                            return; // can't place things if it ain't strategy. Also this is poison.
-                        }
-                        self.places_this_turn += 1;
-                        let tp = &message.args[0];
-                        let x = message.args[1].parse::<f32>();
-                        let y = message.args[2].parse::<f32>();
-                        if x.is_ok() && y.is_ok(){
-                            let x = x.unwrap();
-                            let y = y.unwrap();
-                            if x < 0.0 || x > server.gamesize || y < 0.0 || y > server.gamesize { 
-                                self.kys = true;
-                                return;
-                            }
-                            match tp.as_str() {
-                                "c" => {
-                                    if server.mode != GameMode::Waiting && !server.is_io { // you can't place castles if it's waiting and not an io game
-                                        return; // can't place castles if it isn't in WAITING.
-                                    }
-                                    if !self.has_placed {
-                                        self.has_placed = true;
-                                        server.costs = false;
-                                        self.m_castle = Some(server.place_castle(x, y, self.mode == ClientMode::RealTimeFighter, Some(self.banner)));
-                                        self.commandah.send(ServerCommand::LivePlayerInc (self.team, self.mode)).await.expect("Broadcast failed");
-                                        match self.mode {
-                                            ClientMode::Normal => {
-                                                server.place_basic_fighter(x - 200.0, y, PI, Some(self.banner));
-                                                server.place_basic_fighter(x + 200.0, y, 0.0, Some(self.banner));
-                                                server.place_basic_fighter(x, y - 200.0, 0.0, Some(self.banner));
-                                                server.place_basic_fighter(x, y + 200.0, 0.0, Some(self.banner));
-                                                self.collect(100).await;
-                                            },
-                                            ClientMode::RealTimeFighter => {
-                                                server.place_basic_fighter(x - 100.0, y, PI, Some(self.banner));
-                                                server.place_basic_fighter(x + 100.0, y, 0.0, Some(self.banner));
-                                                self.send_singlet('A').await;
-                                                self.a2a += 1;
-                                            },
-                                            ClientMode::Defense => {
-                                                server.place_basic_fighter(x - 200.0, y, PI, Some(self.banner));
-                                                server.place_basic_fighter(x + 200.0, y, 0.0, Some(self.banner));
-                                                server.place_turret(x, y - 200.0, 0.0, Some(self.banner));
-                                                server.place_turret(x, y + 200.0, 0.0, Some(self.banner));
-                                                self.collect(25).await;
-                                            },
-                                            _ => {
+    }
 
-                                            }
-                                        }
-                                        server.costs = true;
+    async fn refresh_a2a(&mut self) {
+        self.send_protocol_message(ServerToClient::A2A (self.a2a)).await;
+    }
+
+    async fn cost(&mut self, amount : i32) -> bool {
+        if self.score >= amount {
+            self.collect(-amount).await;
+            true
+        }
+        else {
+            self.kys = true;
+            println!("Client can't afford to buy a thing!");
+            false
+        }
+    }
+
+    async fn handle(&mut self, message : ClientToServer, mut server : tokio::sync::MutexGuard<'_, Server>) {
+        if self.is_authorized {
+            match message {
+                ClientToServer::Place (x, y, tp) => {
+                    if self.places_this_turn >= 30 {
+                        return;
+                    }
+                    if server.mode == GameMode::Play && tp != b'c' { // if it is trying to place an object, but it isn't strat mode or waiting mode and it isn't placing a castle
+                        // originally, this retaliated, but now it just refuses. the retaliation was a problem.
+                        println!("ATTEMPT TO PLACE IN PLAY MODE");
+                        return; // can't place things if it ain't strategy. Also this is poison.
+                    }
+                    self.places_this_turn += 1;
+                    if x < 0.0 || x > server.gamesize || y < 0.0 || y > server.gamesize { 
+                        self.kys = true;
+                        return;
+                    }
+                    match tp {
+                        b'c' => {
+                            if server.mode != GameMode::Waiting && !server.is_io { // you can't place castles if it's waiting and not an io game
+                                return; // can't place castles if it isn't in WAITING.
+                            }
+                            if !self.has_placed {
+                                self.has_placed = true;
+                                server.costs = false;
+                                self.m_castle = Some(server.place_castle(x, y, self.mode == ClientMode::RealTimeFighter, Some(self.banner)));
+                                self.commandah.send(ServerCommand::LivePlayerInc (self.team, self.mode)).await.expect("Broadcast failed");
+                                match self.mode {
+                                    ClientMode::Normal => {
+                                        server.place_basic_fighter(x - 200.0, y, PI, Some(self.banner));
+                                        server.place_basic_fighter(x + 200.0, y, 0.0, Some(self.banner));
+                                        server.place_basic_fighter(x, y - 200.0, 0.0, Some(self.banner));
+                                        server.place_basic_fighter(x, y + 200.0, 0.0, Some(self.banner));
+                                        self.collect(100).await;
+                                    },
+                                    ClientMode::RealTimeFighter => {
+                                        server.place_basic_fighter(x - 100.0, y, PI, Some(self.banner));
+                                        server.place_basic_fighter(x + 100.0, y, 0.0, Some(self.banner));
+                                        self.a2a += 1;
+                                        self.refresh_a2a().await;
+                                    },
+                                    ClientMode::Defense => {
+                                        server.place_basic_fighter(x - 200.0, y, PI, Some(self.banner));
+                                        server.place_basic_fighter(x + 200.0, y, 0.0, Some(self.banner));
+                                        server.place_turret(x, y - 200.0, 0.0, Some(self.banner));
+                                        server.place_turret(x, y + 200.0, 0.0, Some(self.banner));
+                                        self.collect(25).await;
+                                    },
+                                    _ => {
+
                                     }
-                                    else {
-                                        message.poison("MULTIPLE CASTLE PLACE ATTEMPTS");
-                                        self.retaliate_from_poison().await;
-                                    }
-                                },
-                                "f" => {
-                                    server.place_basic_fighter(x, y, 0.0, Some(self.banner));
-                                },
-                                "w" => {
-                                    server.place_wall(x, y, Some(self.banner));
-                                },
-                                "t" => {
-                                    server.place_tie_fighter(x, y, 0.0, Some(self.banner));
-                                },
-                                "s" => {
-                                    server.place_sniper(x, y, 0.0, Some(self.banner));
-                                },
-                                "h" => {
-                                    server.place_missile(x, y, 0.0, Some(self.banner));
-                                },
-                                "T" => {
-                                    server.place_turret(x, y, 0.0, Some(self.banner));
-                                },
-                                "n" => {
-                                    server.place_nuke(x, y, 0.0, Some(self.banner));
-                                },
-                                "F" => {
-                                    match self.m_castle {
-                                        Some(cid) => {
-                                            match server.obj_lookup(cid) {
-                                                Some(index) => {
-                                                    let fort = server.place_fort(x, y, 0.0, Some(self.banner));
-                                                    server.objects[index].add_fort(fort);
-                                                }
-                                                None => {}
-                                            }
+                                }
+                                server.costs = true;
+                            }
+                            else {
+                                println!("User is attempting to place a castle more than once.");
+                                self.kys = true;
+                            }
+                        },
+                        b'f' => {
+                            server.place_basic_fighter(x, y, 0.0, Some(self.banner));
+                        },
+                        b'w' => {
+                            if self.walls_remaining > 0 {
+                                server.place_wall(x, y, Some(self.banner));
+                                self.walls_remaining -= 1;
+                            }
+                        },
+                        b't' => {
+                            server.place_tie_fighter(x, y, 0.0, Some(self.banner));
+                        },
+                        b's' => {
+                            server.place_sniper(x, y, 0.0, Some(self.banner));
+                        },
+                        b'h' => {
+                            server.place_missile(x, y, 0.0, Some(self.banner));
+                        },
+                        b'T' => {
+                            server.place_turret(x, y, 0.0, Some(self.banner));
+                        },
+                        b'n' => {
+                            server.place_nuke(x, y, 0.0, Some(self.banner));
+                        },
+                        b'F' => {
+                            match self.m_castle {
+                                Some(cid) => {
+                                    match server.obj_lookup(cid) {
+                                        Some(index) => {
+                                            let fort = server.place_fort(x, y, 0.0, Some(self.banner));
+                                            server.objects[index].add_fort(fort);
                                         }
                                         None => {}
                                     }
-                                },
-                                "m" => {
-                                    server.place_mls(x, y, 0.0, Some(self.banner));
-                                },
-                                "a" => {
-                                    server.place_antirtf_missile(x, y, 0.0, Some(self.banner));
-                                },
-                                "K" => {
-                                    server.place_carrier(x, y, 0.0, Some(self.banner));
-                                },
-                                &_ => {
-                                    message.poison("INVALID PLACE TYPE");
                                 }
-                            };
+                                None => {}
+                            }
+                        },
+                        b'm' => {
+                            server.place_mls(x, y, 0.0, Some(self.banner));
+                        },
+                        b'a' => {
+                            server.place_antirtf_missile(x, y, 0.0, Some(self.banner));
+                        },
+                        b'K' => {
+                            server.place_carrier(x, y, 0.0, Some(self.banner));
+                        },
+                        _ => {
+                            println!("Client attempted to place with an invalid place type.");
                         }
-                        else {
-                            message.poison("INVALID INTEGERS");
-                            self.retaliate_from_poison().await;
-                        }
-                    }
-                    else {
-                        message.poison("INVALID ARGUMENT LENGTH");
                     }
                 },
-                'C' => {
-                    let mut amount = match message.args[0].parse::<i32>() {
-                        Ok(numbah) => numbah,
-                        Err(_) => {
-                            message.poison("INVALID INTEGERS");
-                            self.retaliate_from_poison().await;
-                            0
-                        }
-                    };
-                    amount = amount.abs();
+                ClientToServer::Cost (amount) => {
+                    let amount = amount.abs();
                     println!("Costing an amount of money equal to {amount} coins");
                     self.collect(-amount).await;
                 },
-                'm' => {
-                    let id = match message.args[0].parse::<u32>() {
-                        Ok(numbah) => numbah,
-                        Err(_) => {
-                            message.poison("INVALID INTEGERS");
-                            self.retaliate_from_poison().await;
-                            return;
-                        }
-                    };
-                    let x = match message.args[1].parse::<f32>() {
-                        Ok(numbah) => numbah,
-                        Err(_) => {
-                            message.poison("INVALID INTEGERS");
-                            self.retaliate_from_poison().await;
-                            return;
-                        }
-                    };
-                    let y = match message.args[2].parse::<f32>() {
-                        Ok(numbah) => numbah,
-                        Err(_) => {
-                            message.poison("INVALID INTEGERS");
-                            self.retaliate_from_poison().await;
-                            return;
-                        }
-                    };
-                    let a = match message.args[3].parse::<f32>() {
-                        Ok(numbah) => numbah,
-                        Err(_) => {
-                            message.poison("INVALID INTEGERS");
-                            self.retaliate_from_poison().await;
-                            return;
-                        }
-                    };
+                ClientToServer::Move (id, x, y, a) => {
                     for object in &mut server.objects {
                         if object.get_id() == id && object.get_banner() == self.banner {
                             object.exposed_properties.goal_x = x;
@@ -1100,89 +1058,65 @@ impl Client {
                         }
                     }
                 },
-                'A' => { // AIR TO AIR!
+                ClientToServer::LaunchA2A (target) => { // AIR TO AIR!
                     if self.a2a == 0 {
                         self.kys = true;
                     }
                     if self.m_castle.is_some() {
-                        match message.args[0].parse::<u32>() {
-                            Ok(numbah) => {
-                                let mut obj_vec = None;
-                                for obj in &server.objects {
-                                    if obj.get_id() == numbah {
-                                        obj_vec = Some(obj.exposed_properties.physics.vector_position());
-                                    }
-                                }
-                                match obj_vec {
-                                    None => {},
-                                    Some (vec) => {
-                                        match self.m_castle {
-                                            Some(castleid) => {
-                                                match server.obj_lookup(castleid) {
-                                                    Some (castle) => {
-                                                        if (server.objects[castle].exposed_properties.physics.vector_position() - vec).magnitude() < 1500.0 {
-                                                            self.a2a -= 1;
-                                                            let off_ang = functions::coterminal(server.objects[castle].exposed_properties.physics.angle() - (server.objects[castle].exposed_properties.physics.vector_position() - vec).angle(), PI * 2.0);
-                                                            let pos = server.objects[castle].exposed_properties.physics.vector_position() + Vector2::new_from_manda(if off_ang > PI { 50.0 } else { -50.0 }, server.objects[castle].exposed_properties.physics.angle());
-                                                            let launchangle = server.objects[castle].exposed_properties.physics.angle() - PI/2.0; // rust requires this to be explicit because of the dumbass borrow checker
-                                                            let a2a_id = server.place_air2air(pos.x, pos.y, launchangle, numbah, Some(self.banner));
-                                                            let a2a_i = server.obj_lookup(a2a_id).unwrap(); // it's certain to exist
-                                                            server.objects[a2a_i].exposed_properties.physics.velocity = server.objects[castle].exposed_properties.physics.velocity;
-                                                        }
-                                                    }
-                                                    None => {}
-                                                }
-                                            }
-                                            None => {}
+                        for obj in &server.objects {
+                            if obj.get_id() == target {
+                                let obj_vec = obj.exposed_properties.physics.vector_position();
+                                match server.obj_lookup(self.m_castle.unwrap()) {
+                                    Some (castle) => {
+                                        if (server.objects[castle].exposed_properties.physics.vector_position() - obj_vec).magnitude() < 1500.0 {
+                                            self.a2a -= 1;
+                                            let off_ang = functions::coterminal(server.objects[castle].exposed_properties.physics.angle() - (server.objects[castle].exposed_properties.physics.vector_position() - obj_vec).angle(), PI * 2.0);
+                                            let pos = server.objects[castle].exposed_properties.physics.vector_position() + Vector2::new_from_manda(if off_ang > PI { 50.0 } else { -50.0 }, server.objects[castle].exposed_properties.physics.angle());
+                                            let launchangle = server.objects[castle].exposed_properties.physics.angle() - PI/2.0; // rust requires this to be explicit because of the dumbass borrow checker
+                                            let a2a_id = server.place_air2air(pos.x, pos.y, launchangle, target, Some(self.banner));
+                                            let a2a_i = server.obj_lookup(a2a_id).unwrap(); // it's certain to exist
+                                            server.objects[a2a_i].exposed_properties.physics.velocity = server.objects[castle].exposed_properties.physics.velocity;
                                         }
-                                    }
-                                }
-                            },
-                            Err(_) => {
-                                message.poison("INVALID INTEGERS");
-                                self.retaliate_from_poison().await;
-                                return;
-                            }
-                        };
-                    }
-                },
-                'R' => {
-                    if server.mode == GameMode::Play && self.m_castle.is_some(){
-                        match self.m_castle {
-                            Some (cid) => {
-                                match server.obj_lookup(cid) {
-                                    Some (index) => {
-                                        let mut thrust = 0.0;
-                                        let mut resistance = 1.0;
-                                        let mut angle_thrust = 0.0;
-                                        if message.args[0] == "1" { // THRUST
-                                            thrust = 2.0;
-                                        }
-                                        if message.args[1] == "1" { // TURN LEFT
-                                            angle_thrust -= 0.02;
-                                        }
-                                        if message.args[2] == "1" { // TURN RIGHT
-                                            angle_thrust += 0.02;
-                                        }
-                                        if message.args[3] == "1" { // AIRBRAKE
-                                            resistance = 0.8;
-                                        }
-                                        server.objects[index].exposed_properties.shooter_properties.suppress = !(message.args[4] == "1");
-                                        let thrust = Vector2::new_from_manda(thrust, server.objects[index].exposed_properties.physics.angle() - PI/2.0);
-                                        server.objects[index].exposed_properties.physics.velocity += thrust;
-                                        server.objects[index].exposed_properties.physics.velocity *= resistance;
-                                        server.objects[index].exposed_properties.physics.angle_v += angle_thrust;
-                                        server.objects[index].exposed_properties.physics.angle_v *= 0.9;
-                                        server.objects[index].exposed_properties.physics.angle_v *= resistance;
                                     }
                                     None => {}
                                 }
+                                break;
+                            }
+                        }
+                    }
+                },
+                ClientToServer::PilotRTF (fire, left, right, airbrake, shoot) => {
+                    if server.mode == GameMode::Play && self.m_castle.is_some(){
+                        match server.obj_lookup(self.m_castle.unwrap()) {
+                            Some (index) => {
+                                let mut thrust = 0.0;
+                                let mut resistance = 1.0;
+                                let mut angle_thrust = 0.0;
+                                if fire {
+                                    thrust = 2.0;
+                                }
+                                if left {
+                                    angle_thrust -= 0.02;
+                                }
+                                if right {
+                                    angle_thrust += 0.02;
+                                }
+                                if airbrake {
+                                    resistance = 0.8;
+                                }
+                                server.objects[index].exposed_properties.shooter_properties.suppress = !shoot;
+                                let thrust = Vector2::new_from_manda(thrust, server.objects[index].exposed_properties.physics.angle() - PI/2.0);
+                                server.objects[index].exposed_properties.physics.velocity += thrust;
+                                server.objects[index].exposed_properties.physics.velocity *= resistance;
+                                server.objects[index].exposed_properties.physics.angle_v += angle_thrust;
+                                server.objects[index].exposed_properties.physics.angle_v *= 0.9;
+                                server.objects[index].exposed_properties.physics.angle_v *= resistance;
                             }
                             None => {}
                         }
                     }
                 },
-                'T' => { // Talk
+                ClientToServer::Chat (chatter, broadcast) => { // Talk
                     /*let args = vec![format!("<span style='color: pink;'>{} SAYS</span>: {}", server.banners[self.banner], message.args[0])];
                     if self.team.is_some() && message.args[0].chars().nth(0) != Some('!') {
                         server.broadcast_to_team(ProtocolMessage {
@@ -1196,52 +1130,145 @@ impl Client {
                             args
                         });
                     }*/
-                    server.chat(message.args[0].clone(), self.banner, if self.is_team_leader { 1 } else { 0 },
-                        if self.team.is_none() || message.args[1] == "broadcast" {
+                    println!("{} says {}", server.banners[self.banner], chatter);
+                    server.chat(chatter, self.banner, if self.is_team_leader { 1 } else { 0 },
+                        if self.team.is_none() || broadcast {
                             None
                         }
                         else {
                             self.team
                         }
                     );
-                    println!("{} says {}", server.banners[self.banner], message.args[0]);
                 },
-                'U' => {
+                ClientToServer::UpgradeThing (_, _) => {
                     // Upgrade.
-                    if message.args.len() != 2 {
-                        message.poison("INVALID ARGUMENT LENGTH");
-                    }
-                    let id = match message.args[0].parse::<u32>() {
-                        Ok(id) => id,
-                        Err(_) => {
-                            message.poison("INVALID ID");
-                            return;
-                        }
-                    };
-                    println!("Upgrading id {} to {}", id, message.args[1]);
-                    let upg = message.args[1].clone();
-                    let price = *server.upg_costs.entry(message.args[1].clone()).or_insert(0);
+                    /*
+                    println!("Upgrading id {} to {}", id, upgrade);
+                    let price = *server.upg_costs.entry(upgrade.clone()).or_insert(0);
                     if self.score >= price {
                         self.collect(-price).await;
                         for object in &mut server.objects {
                             if object.get_id() == id {
-                                object.upgrade(upg);
+                                object.upgrade(upgrade.clone());
+                                server.broadcast(ServerToClient::UpgradeThing (id, upgrade));
                                 break;
                             }
                         }
-                        server.broadcast(ClientCommand::AddUpgrade(id, message.args[1].clone()));
                     }
                     else { // something nefarious is going on!
                         self.kys = true;
+                    }*/
+                    self.send_protocol_message(ServerToClient::Chat ("Upgrading manually is DISABLED! Use the Shop command instead.".to_string(), 0, 6)).await;
+                    self.kys = true;
+                },
+                ClientToServer::Ping => {
+                    self.send_protocol_message(ServerToClient::Pong).await;
+                },
+                ClientToServer::Connect (_, _, _) => {
+                    println!("What? Client trying to connect twice? Killing.");
+                    self.kys = true;
+                },
+                ClientToServer::SelfTest (boolean, byte, ushort, uint, int, float, string) => {
+                    println!("Got self test message {}, {}, {}, {}, {}, {}, {}", boolean, byte, ushort, uint, int, float, string);
+                },
+                ClientToServer::Shop (thing) => {
+                    if self.m_castle.is_some() {
+                        match thing {
+                            b'w' => {
+                                if self.cost(30).await {
+                                    self.walls_cap += 2;
+                                    self.walls_remaining += 2;
+                                }
+                            }
+                            b'g' => {
+                                if self.cost(30).await {
+                                    server.upgrade_thing_to(self.m_castle.unwrap(), "b".to_string()).await;
+                                }
+                            }
+                            b's' => {
+                                if self.cost(40).await {
+                                    server.upgrade_thing_to(self.m_castle.unwrap(), "s".to_string()).await;
+                                }
+                            }
+                            b'f' => {
+                                if self.cost(70).await {
+                                    server.upgrade_thing_to(self.m_castle.unwrap(), "f".to_string()).await;
+                                }
+                            }
+                            b'h' => {
+                                if self.cost(150).await {
+                                    server.upgrade_thing_to(self.m_castle.unwrap(), "h".to_string()).await;
+                                }
+                            }
+                            _ => {
+                                println!("Invalid shop command {}", thing);
+                            }
+                        }
                     }
-                }
-                _ => {
-                    message.poison("INAPPROPRIATE COMMAND");
                 }
             }
         }
         else {
-            message.poison("INVALID COMMAND");
+            match message {
+                ClientToServer::Connect (password, banner, mode) => {
+                    if server.new_user_can_join() {
+                        let lockah = server.authenticate(password, mode == "spectator");
+                        match lockah { // If you condense this, for === RUST REASONS === it keeps the mutex locked.
+                            AuthState::Error => {
+                                println!("New user has invalid password!");
+                                self.send_protocol_message(ServerToClient::BadPassword).await;
+                                return;
+                            },
+                            AuthState::Single => {
+                                println!("New user has authenticated as single player");
+                                self.send_protocol_message(ServerToClient::Welcome).await;
+                                server.user_logged_in(self).await;
+                                server.banner_add(Some(self), Arc::new(banner));
+                                self.is_authorized = true;
+                            },
+                            AuthState::Team (team, tl) => {
+                                println!("New user has authenticated as player in team {}", server.banners[server.teams[team].banner_id]);
+                                self.team = Some(team);
+                                self.send_protocol_message(ServerToClient::Welcome).await;
+                                if tl {
+                                    self.send_protocol_message(ServerToClient::YouAreTeamLeader).await;
+                                    self.is_team_leader = true;
+                                }
+                                server.user_logged_in(self).await;
+                                server.banner_add(Some(self), Arc::new(banner));
+                                server.teams[team].members.push(self.banner);
+                                self.is_authorized = true;
+                            },
+                            AuthState::Spectator => {
+                                println!("Spectator joined!");
+                                self.send_protocol_message(ServerToClient::YouAreSpectating).await;
+                                server.spectator_joined(self).await;
+                            }
+                        }
+                        self.mode = match mode.as_str() {
+                            "normal" => ClientMode::Normal,
+                            "defender" => ClientMode::Defense,
+                            "rtf" => ClientMode::RealTimeFighter,
+                            _ => ClientMode::Normal
+                        };
+                    }
+                    else {
+                        println!("New user can't join!");
+                        self.send_protocol_message(ServerToClient::YouAreSpectating).await;
+                        server.spectator_joined(self).await;
+                    }
+                },
+                ClientToServer::Ping => {
+                    self.send_protocol_message(ServerToClient::Pong).await;
+                },
+                ClientToServer::SelfTest (boolean, byte, ushort, uint, int, float, string) => {
+                    println!("Got self test message {}, {}, {}, {}, {}, {}, {}", boolean, byte, ushort, uint, int, float, string);
+                }
+                _ => {
+                    println!("Client appears to be making a shoddy attempt to suborn. Deleting.");
+                    self.kys = true;
+                }
+            }
         }
     }
 
@@ -1263,75 +1290,46 @@ impl Client {
 async fn got_client(client : WebSocketClientStream, server : Arc<Mutex<Server>>, broadcaster : tokio::sync::broadcast::Sender<ClientCommand>, commandset : tokio::sync::mpsc::Sender<ServerCommand>){
     commandset.send(ServerCommand::Connect).await.unwrap();
     let mut receiver = broadcaster.subscribe();
-    let mut moi = Client::new(commandset);/*
+    let mut moi = Client::new(client, commandset);/*
     if server.lock().await.passwordless {
         moi.send_singlet('p').await;
     }*/
     // passwordless broadcasts aren't really relevant any more
     'cliloop: loop {
         select! {
-            insult = client.read().fuse() => {
+            insult = moi.socket.read::<ClientToServer>().fuse() => {
                 match insult {
-                    Some(result) => {
-                        let msg = match result {
-                            Ok(msg) => msg,
-                            Err(e) => {
-                                println!("UH NOES! A SOCKET BORKY HAPPENDY! POOPLES! {e}");
-                                println!("This is not critical, your server *should* survive.");
-                                break 'cliloop;
-                            }
-                        };
-                        if msg.is_text(){
-                            let text = match msg.to_str() {
-                                Ok(text) => text,
-                                Err(()) => ""
-                            };
-                            if text == "_"{
-                                moi.send_text("_").await;
-                            }
-                            else {
-                                let p = ProtocolMessage::parse_string(text.to_string());
-                                if p.is_some() {
-                                    let serverlock = server.lock().await;
-                                    moi.handle(p.unwrap() /* If it made it this far, there's data to unwrap */, serverlock).await;
-                                    if moi.kys { // if it's decided to break the connection
-                                        break 'cliloop;
-                                    }
-                                }
-                                else {
-                                    break 'cliloop; // don't take no truck with poison frames no more
-                                }
-                            }
+                    Some(insult) => {
+                        let serverlock = server.lock().await;
+                        moi.handle(insult, serverlock).await;
+                        if moi.kys { // if it's decided to break the connection
+                            break 'cliloop;
                         }
-                    },
+                    }
                     None => {
-                        println!("Client gracefully disconnected");
                         break 'cliloop;
                     }
                 }
             },
             command = receiver.recv().fuse() => {
                 match command {
-                    Ok (ClientCommand::Tick (counter, modechar)) => {
-                        if modechar == "0" { // if it's play mode
+                    Ok (ClientCommand::Tick (counter, mode)) => {
+                        if mode == 0 { // if it's play mode
                             moi.places_this_turn = 0;
+                            moi.walls_remaining = moi.walls_cap; // it can't use 'em until next turn, ofc
                         }
                         let mut schlock = server.lock().await;
                         schlock.winning_banner = moi.banner;
-                        let mut args = vec![counter.to_string(), modechar];
-                        if moi.m_castle.is_some() {
-                            match schlock.obj_lookup(moi.m_castle.unwrap()) {
-                                Some (index) => {
-                                    args.push(schlock.objects[index].health().to_string());
-                                },
-                                None => {}
+                        moi.send_protocol_message(ServerToClient::Tick (counter, mode)).await;
+                        for obj in &schlock.objects {
+                            if obj.get_banner() == moi.banner && obj.do_stream_health() {
+                                moi.send_protocol_message(ServerToClient::HealthUpdate (obj.get_id(), obj.get_health_perc())).await;
                             }
                         }
-                        moi.send_protocol_message(ServerToClient::Tick).await;
                         if !moi.is_alive(schlock) {
                             if moi.m_castle.is_some() {
                                 moi.m_castle = None;
-                                moi.send_singlet('l').await;
+                                moi.send_protocol_message(ServerToClient::YouLose).await;
                                 moi.commandah.send(ServerCommand::LivePlayerDec (moi.team, moi.mode)).await.expect("Broadcast failed");
                             }
                         }
@@ -1354,13 +1352,13 @@ async fn got_client(client : WebSocketClientStream, server : Arc<Mutex<Server>>,
                     },
                     Ok (ClientCommand::ChatRoom (content, sender, priority, target)) => {
                         if target.is_none() || target == moi.team {
-                            moi.send_protocol_message(ServerToClient::ChatRoom(content, sender, priority));
+                            moi.send_protocol_message(ServerToClient::Chat(content, sender as u32, priority)).await;
                         }
                     },
                     Ok (ClientCommand::GrantA2A (to)) => {
                         if to == moi.banner && moi.mode == ClientMode::RealTimeFighter {
                             moi.a2a += 1;
-                            moi.send_protocol_message(ServerToClient::EquipA2A);
+                            moi.refresh_a2a().await;
                         }
                     },
                     Ok (ClientCommand::AttachToBanner (id, banner, does_cost)) => {
@@ -1400,6 +1398,7 @@ async fn got_client(client : WebSocketClientStream, server : Arc<Mutex<Server>>,
             }
         }
     }
+    moi.socket.shutdown().await;
     let mut serverlock = server.lock().await;
     if moi.m_castle.is_some() && serverlock.obj_lookup(moi.m_castle.unwrap()).is_some() {
         moi.commandah.send(ServerCommand::LivePlayerDec (moi.team, moi.mode)).await.expect("Broadcast failed");
@@ -1471,7 +1470,10 @@ enum ServerCommand {
     Connect,
     Disconnect,
     Broadcast (String),
-    RejectObject (u32)
+    RejectObject (u32),
+    PrintBanners,
+    Nuke (usize),
+    Reset
 }
 
 
@@ -1508,12 +1510,6 @@ async fn main(){
         permit_npcs         : true,
         port                : 0,
         sql                 : "default.db".to_string(),
-        upg_costs           : HashMap::from([
-            ("b".to_string(), 30),
-            ("f".to_string(), 70),
-            ("h".to_string(), 150),
-            ("s".to_string(), 40),
-        ]),
         worldzone_count     : 1,
         zones               : Vec::new()
     };
@@ -1532,12 +1528,14 @@ async fn main(){
         let init_query = "CREATE TABLE IF NOT EXISTS logins (banner TEXT, password TEXT, highscore INTEGER, wins INTEGER, losses INTEGER);CREATE TABLE IF NOT EXISTS teams_records (teamname TEXT, wins INTEGER, losses INTEGER);";
         connection.execute(init_query).unwrap();
         loop {
-            //use tokio::time::Instant;
             interval.tick().await;
             let mut lawk = server_mutex_loopah.lock().await;
-            //let start = Instant::now();
+            use tokio::time::Instant;
+            let start = Instant::now();
             lawk.mainloop();
-            //println!("Mainloop took {:?}", start.elapsed());
+            if start.elapsed() > tokio::time::Duration::from_millis((1000.0/FPS) as u64) {
+                println!("LOOP OVERRUN!");
+            }
             match commandget.try_recv() {
                 Ok (ServerCommand::Start) => {
                     lawk.start();
@@ -1572,7 +1570,7 @@ async fn main(){
                 },
                 Ok (ServerCommand::PasswordlessToggle) => {
                     lawk.passwordless = !lawk.passwordless;
-                    lawk.broadcast(SetPasswordless (lawk.passwordless));
+                    lawk.broadcast(ServerToClient::SetPasswordless (lawk.passwordless));
                     println!("Set passwordless mode to {}", lawk.passwordless);
                 },
                 Ok(ServerCommand::LivePlayerInc (team, mode)) => {
@@ -1595,6 +1593,24 @@ async fn main(){
                         lawk.teams[team.unwrap()].live_count -= 1;
                     }
                     println!("Player died. Living players: {}", lawk.living_players);
+                },
+                Ok (ServerCommand::PrintBanners) => {
+                    println!("Current banners are,");
+                    for banner in 0..lawk.banners.len() {
+                        println!("{}: {}", banner, lawk.banners[banner]);
+                    }
+                }
+                Ok (ServerCommand::Nuke (banner)) => {
+                    for object in 0..lawk.objects.len() {
+                        if lawk.objects[object].get_banner() == banner {
+                            let x = lawk.objects[object].exposed_properties.physics.cx();
+                            let y = lawk.objects[object].exposed_properties.physics.cy();
+                            lawk.place_nuke(x, y, 0.0, None);
+                        }
+                    }
+                },
+                Ok (ServerCommand::Reset) => {
+                    lawk.reset()
                 },
                 Err (TryRecvError::Disconnected) => {
                     println!("The channel handling server control was disconnected!");
@@ -1654,6 +1670,15 @@ async fn main(){
                         };
                         ServerCommand::Autonomous (min_players, max_players, auto_timeout)
                     },
+                    "getbanners" => {
+                        ServerCommand::PrintBanners
+                    },
+                    "nuke" => {
+                        ServerCommand::Nuke (input("Banner to nuke: ").parse::<usize>().unwrap())
+                    }
+                    "reset" => {
+                        ServerCommand::Reset
+                    }
                     _ => {
                         println!("Invalid command.");
                         continue;
@@ -1664,9 +1689,10 @@ async fn main(){
         });
     }
 
-    let websocket_server = WebSocketServer::new(3000, "MMOSG".to_string()).await;
+    let mut websocket_server = WebSocketServer::new(port, "MMOSG".to_string()).await;
     loop {
-        tokio::task::spawn(got_client(websocket_server.accept::<ClientToServer, ServerToClient>().await, server_mutex.clone(), broadcast_tx.clone(), commandset.clone()));
+        let client = websocket_server.accept::<ClientToServer, ServerToClient>().await;
+        tokio::task::spawn(got_client(client, server_mutex.clone(), broadcast_tx.clone(), commandset_clone.clone()));
     }
 }
 
