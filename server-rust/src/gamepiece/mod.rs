@@ -157,7 +157,7 @@ pub trait GamePiece {
         std::cmp::min(((self.cost() * 3) / 2) as u32, 75) // The most you can score on any capture is, by default, 75
     }
 
-    fn on_upgrade(&mut self, _properties : &mut ExposedProperties, _upgrade : Arc<String>) {
+    fn on_upgrade(&mut self, _properties : &mut ExposedProperties, _upgrade : &String) {
 
     }
 
@@ -195,11 +195,10 @@ pub struct GamePieceBase {
     pub shoot_timer        : u32,
     broadcasts             : Vec<ServerToClient>,
     forts                  : Vec<u32>,
-    pub upgrades           : Vec<Arc<String>>
+    pub upgrades           : Vec<String>
 }
 
 use tokio::sync::Mutex; // LET THE WARNING ON THIS LINE FOREVER BE A TROPHY OF OUR VICTORY AGAINST MUTEXES
-use std::sync::Arc;
 
 impl GamePieceBase {
     pub fn new(piece : Box<dyn GamePiece + Send + Sync>, x : f32, y : f32, a : f32) -> Self {
@@ -568,9 +567,8 @@ impl GamePieceBase {
     }
 
     pub fn upgrade(&mut self, up : String) {
-        let up = Arc::new(up);
-        self.piece.on_upgrade(&mut self.exposed_properties, up.clone());
-        self.upgrades.push(up.clone());
+        self.piece.on_upgrade(&mut self.exposed_properties, &up);
+        self.upgrades.push(up);
     }
 }
 
@@ -650,17 +648,53 @@ impl GamePiece for Castle {
         50
     }
 
-    fn on_upgrade(&mut self, properties : &mut ExposedProperties, upgrade : Arc<String>) {
-        println!("{}", upgrade);
+    fn on_upgrade(&mut self, properties : &mut ExposedProperties, upgrade : &String) {
+        /*
+Upgrade tiers
+**Gun**:
+1. faster gun, but not nearly as fast as the current faster gun
+2. twice repeater gun
+3. much better range
+**Cloaking**:
+1. sniper
+**Drive**:
+1. faster RTF
+2. even faster RTF
+3. better turns (more controlled, but also faster)
+**Health**:
+1. Higher regen
+2. Higher maxhealth
+3. Much higher regen
+4. Much higher maxhealth
+        */
         match upgrade.as_str() {
             "b" => { // shot counter speed
-                properties.shooter_properties.counter = 9;
+                properties.shooter_properties.counter = 12;
             },
+            "b2" => {
+                properties.repeater.max_repeats = 1;
+                properties.repeater.repeat_cd = 1;
+            },
+            "b3" => {
+                properties.shooter_properties.range = 80;
+            }
             "f" => { // fast
-                properties.physics.speed_cap = 40.0;
+                properties.physics.speed_cap = 30.0;
+            },
+            "f2" => { // faster
+                properties.physics.speed_cap = 50.0;
             },
             "h" => { // heal
-                properties.health_properties.passive_heal = 0.007;
+                properties.health_properties.passive_heal = 0.005;
+            },
+            "h2" => {
+                properties.health_properties.max_health = 5.0;
+            },
+            "h3" => {
+                properties.health_properties.passive_heal = 0.01;
+            },
+            "h4" => {
+                properties.health_properties.max_health = 8.0;
             },
             &_ => {
                 

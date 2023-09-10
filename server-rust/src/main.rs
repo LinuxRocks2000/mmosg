@@ -197,11 +197,27 @@ impl Server {
         return false;
     }
 
-    async fn upgrade_thing_to(&mut self, thing : u32, upgrade : String) {
+    fn upgrade_thing_to(&mut self, thing : u32, upgrade : String) {
         for object in &mut self.objects {
             if object.get_id() == thing {
                 object.upgrade(upgrade.clone());
                 self.broadcast(ServerToClient::UpgradeThing (thing, upgrade));
+                break;
+            }
+        }
+    }
+
+    fn upgrade_next_tier(&mut self, thing : u32, upgrade : String) {
+        for object in &mut self.objects {
+            if object.get_id() == thing {
+                let mut stack = 1;
+                let mut stackstring = stack.to_string();
+                while object.upgrades.contains(&(upgrade.clone() + if stack == 1 { "" } else { stackstring.as_str() })) {
+                    stack += 1;
+                    stackstring = stack.to_string();
+                }
+                object.upgrade(upgrade.clone() + if stack == 1 { "" } else { stackstring.as_str() } );
+                self.broadcast(ServerToClient::UpgradeThing (thing, upgrade.clone() + if stack == 1 { "" } else { stackstring.as_str() }));
                 break;
             }
         }
@@ -906,6 +922,11 @@ impl Client {
         }
     }
 
+    async fn grant_a2a(&mut self) {
+        self.a2a += 1;
+        self.refresh_a2a().await;
+    }
+
     async fn collect(&mut self, amount : i32) {
         self.score += amount;
         self.send_protocol_message(ServerToClient::SetScore(self.score)).await;
@@ -973,6 +994,7 @@ impl Client {
                                         server.place_basic_fighter(x + 100.0, y, 0.0, Some(self.banner));
                                         self.a2a += 1;
                                         self.refresh_a2a().await;
+                                        self.collect(1000).await;
                                     },
                                     ClientMode::Defense => {
                                         server.place_basic_fighter(x - 200.0, y, PI, Some(self.banner));
@@ -1092,14 +1114,16 @@ impl Client {
                                 let mut thrust = 0.0;
                                 let mut resistance = 1.0;
                                 let mut angle_thrust = 0.0;
+                                let is_better_turns = server.objects[index].upgrades.contains(&"f3".to_string());
+                                let angle_thrust_power = if is_better_turns { 0.04 } else { 0.02 };
                                 if fire {
                                     thrust = 2.0;
                                 }
                                 if left {
-                                    angle_thrust -= 0.02;
+                                    angle_thrust -= angle_thrust_power;
                                 }
                                 if right {
-                                    angle_thrust += 0.02;
+                                    angle_thrust += angle_thrust_power;
                                 }
                                 if airbrake {
                                     resistance = 0.8;
@@ -1109,7 +1133,7 @@ impl Client {
                                 server.objects[index].exposed_properties.physics.velocity += thrust;
                                 server.objects[index].exposed_properties.physics.velocity *= resistance;
                                 server.objects[index].exposed_properties.physics.angle_v += angle_thrust;
-                                server.objects[index].exposed_properties.physics.angle_v *= 0.9;
+                                server.objects[index].exposed_properties.physics.angle_v *= if is_better_turns { 0.8 } else { 0.9 };
                                 server.objects[index].exposed_properties.physics.angle_v *= resistance;
                             }
                             None => {}
@@ -1182,22 +1206,27 @@ impl Client {
                             }
                             b'g' => {
                                 if self.cost(30).await {
-                                    server.upgrade_thing_to(self.m_castle.unwrap(), "b".to_string()).await;
+                                    server.upgrade_next_tier(self.m_castle.unwrap(), "b".to_string());
                                 }
                             }
                             b's' => {
                                 if self.cost(40).await {
-                                    server.upgrade_thing_to(self.m_castle.unwrap(), "s".to_string()).await;
+                                    server.upgrade_next_tier(self.m_castle.unwrap(), "s".to_string());
                                 }
                             }
                             b'f' => {
                                 if self.cost(70).await {
-                                    server.upgrade_thing_to(self.m_castle.unwrap(), "f".to_string()).await;
+                                    server.upgrade_next_tier(self.m_castle.unwrap(), "f".to_string());
                                 }
                             }
                             b'h' => {
                                 if self.cost(150).await {
-                                    server.upgrade_thing_to(self.m_castle.unwrap(), "h".to_string()).await;
+                                    server.upgrade_next_tier(self.m_castle.unwrap(), "h".to_string());
+                                }
+                            }
+                            b'a' => {
+                                if self.cost(100).await {
+                                    self.grant_a2a().await;
                                 }
                             }
                             _ => {
@@ -1357,8 +1386,7 @@ async fn got_client(client : WebSocketClientStream, server : Arc<Mutex<Server>>,
                     },
                     Ok (ClientCommand::GrantA2A (to)) => {
                         if to == moi.banner && moi.mode == ClientMode::RealTimeFighter {
-                            moi.a2a += 1;
-                            moi.refresh_a2a().await;
+                            moi.grant_a2a().await;
                         }
                     },
                     Ok (ClientCommand::AttachToBanner (id, banner, does_cost)) => {
