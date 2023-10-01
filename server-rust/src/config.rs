@@ -63,6 +63,9 @@ impl Config {
 
     pub fn load_into(&self, server : &mut Server) {
         server.gamesize = self.json.world_size;
+        if self.json.world_size > 50000.0 {
+            server.vvlm = true;
+        }
         server.port = match self.json.port {
             Some(port) => port,
             None => 3000

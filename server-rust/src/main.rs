@@ -68,7 +68,7 @@ pub enum ServerToClient {
     BannerAdd (u32, String), // banner id, banner text
     BannerAddToTeam (u32, u32), // banner we're adding to a team, team banner.
     End (u32), // banner that won: this can be a team.
-    Metadata (f32, u32),
+    Metadata (f32, u32), 
     SetScore (i32),
     Chat (String, u32, u8), // message, sender, priority
     BadPassword,
@@ -158,7 +158,8 @@ pub struct Server {
     port              : u16,
     sql               : String,
     worldzone_count   : usize,
-    zones             : Vec<Vec<usize>>
+    zones             : Vec<Vec<usize>>,
+    vvlm              : bool
 }
 
 enum AuthState {
@@ -375,6 +376,9 @@ impl Server {
     }
 
     fn place_random_rubble(&mut self) { // Drop a random chest or wall (or something else, if I add other things)
+        if self.vvlm {
+            return; // rubble can't be placed in VVLMs, this is a preservation mechanism
+        }
         let mut rng = rand::thread_rng();
         let x = rng.gen_range(0.0..self.gamesize);
         let y = rng.gen_range(0.0..self.gamesize);
@@ -994,7 +998,6 @@ impl Client {
                                         server.place_basic_fighter(x + 100.0, y, 0.0, Some(self.banner));
                                         self.a2a += 1;
                                         self.refresh_a2a().await;
-                                        self.collect(1000).await;
                                     },
                                     ClientMode::Defense => {
                                         server.place_basic_fighter(x - 200.0, y, PI, Some(self.banner));
@@ -1539,7 +1542,8 @@ async fn main(){
         port                : 0,
         sql                 : "default.db".to_string(),
         worldzone_count     : 1,
-        zones               : Vec::new()
+        zones               : Vec::new(),
+        vvlm                : false
     };
     //rx.close().await;
     server.load_config();
