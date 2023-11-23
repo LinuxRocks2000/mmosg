@@ -195,7 +195,8 @@ pub struct GamePieceBase {
     pub shoot_timer        : u32,
     broadcasts             : Vec<ServerToClient>,
     forts                  : Vec<u32>,
-    pub upgrades           : Vec<String>
+    pub upgrades           : Vec<String>,
+    pub zones              : Vec<usize>
 }
 
 use tokio::sync::Mutex; // LET THE WARNING ON THIS LINE FOREVER BE A TROPHY OF OUR VICTORY AGAINST MUTEXES
@@ -209,6 +210,7 @@ impl GamePieceBase {
         let mut thing = Self {
             banner : 0,
             shoot_timer : 20,
+            zones : vec![],
             exposed_properties : ExposedProperties {
                 health_properties : HealthProperties {
                     max_health : 2.0,
