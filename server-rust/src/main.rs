@@ -136,7 +136,7 @@ pub struct Server {
     password          : String,
     objects           : Vec<GamePieceBase>,
     teams             : Vec<TeamData>,
-    banners           : Vec<Arc<String>>,
+    banners           : Vec<String>,
     gamesize          : f32,
     authenticateds    : u32,
     terrain_seed      : u32,
@@ -814,7 +814,7 @@ impl Server {
         return AuthState::Error;
     }
 
-    fn banner_add(&mut self, mut dispatcha : Option<&mut Client>, mut banner : Arc<String>) -> usize {
+    /*fn banner_add(&mut self, mut dispatcha : Option<&mut Client>, mut banner : Arc<String>) -> usize {
         while self.banners.contains(&banner) {
             banner = Arc::new(banner.to_string() + ".copy");
         }
@@ -829,6 +829,17 @@ impl Server {
             }
         }
         self.banners.push(banner.clone());
+        bannah
+    }*/
+
+    fn banner_add(&mut self, mut banner : String) -> usize {
+        while self.banners.contains(&banner) {
+            banner += ".copy";
+        }
+        let bannah = self.banners.len();
+        self.broadcast(ServerToClient::BannerAdd (bannah as u32, banner.clone()));
+        println!("Created new banner {}, {}", bannah, banner);
+        self.banners.push(banner);
         bannah
     }
 
@@ -903,7 +914,7 @@ impl Server {
     }
 
     fn new_team(&mut self, name : String, password : String) {
-        let banner = self.banner_add(None, Arc::new(name));
+        let banner = self.banner_add(name);
         let id = self.teams.len();
         self.teams.push(TeamData {
             id,
@@ -1158,15 +1169,21 @@ impl Client {
                                                 if tl {
                                                     self.send_protocol_message(ServerToClient::YouAreTeamLeader).await;
                                                 }
+                                                self.is_authorized = true;
                                             },
                                             AuthState::Single => {
                                                 self.send_protocol_message(ServerToClient::Welcome).await;
+                                                self.is_authorized = true;
                                             },
                                             _ => {println!("yooo");}
                                         }
                                     },
                                     InitialSetupCommand::Message (message) => {
                                         self.send_protocol_message(message).await;
+                                    },
+                                    InitialSetupCommand::Metadata (gamesize, banner) => {
+                                        self.send_protocol_message(ServerToClient::Metadata(gamesize, banner as u32)).await;
+                                        self.banner = banner;
                                     },
                                     InitialSetupCommand::Finished => {
                                         break;
@@ -1269,7 +1286,6 @@ async fn got_client(client : WebSocketClientStream, server : Arc<Mutex<Server>>,
                 match insult {
                     Some(insult) => {
                         moi.handle(insult).await;
-                        let serverlock = server.lock().await;
                         if moi.kys { // if it's decided to break the connection
                             break 'cliloop;
                         }
@@ -1447,6 +1463,7 @@ pub enum PlaceCommand {
 enum InitialSetupCommand {
     Message (ServerToClient), // send an arbitrary protocol message
     Finished,
+    Metadata (f32, usize),
     Joined (AuthState)
 }
 
@@ -1492,7 +1509,7 @@ async fn main(){
         gamesize            : 5000.0,
         authenticateds      : 0,
         terrain_seed        : rng.gen(),
-        banners             : vec![Arc::new("None".to_string())],
+        banners             : vec!["Syst3m".to_string()],
         top_id              : 1, // id 0 is the "none" id
         counter             : 1,
         costs               : true,
@@ -1530,7 +1547,7 @@ async fn main(){
         connection.execute(init_query).unwrap();
         loop {
             let mut lawk = server_mutex_loopah.lock().await;
-            select! { // THIS IS BROKEN! It deadlocks. The reason for the deadlock is that I'm using mutexes.
+            select! { // THIS IS BROKEN! It has constant, slow locking that bogs down performance. The reason for this is mutexes.
 /*
 | Problems caused
 |    by mutexes
@@ -1638,10 +1655,17 @@ async fn main(){
                                 transmit.send(InitialSetupCommand::Joined (AuthState::Spectator)).await.unwrap();
                             }
                             for object in &lawk.objects {
-                                transmit.send(InitialSetupCommand::Message (object.get_new_message()));
+                                transmit.send(InitialSetupCommand::Message (object.get_new_message())).await.unwrap();
+                                for upg in &object.upgrades {
+                                    transmit.send(InitialSetupCommand::Message (ServerToClient::UpgradeThing(object.exposed_properties.id, upg.clone()))).await.unwrap();
+                                }
                             }
-                            let banner_id = lawk.banner_add(None, banner);
-                            transmit.send(InitialSetupCommand::Message (ServerCommand::Metadata (lawk.gamesize, banner_id)))
+                            for i in 0..lawk.banners.len() {
+                                transmit.send(InitialSetupCommand::Message (ServerToClient::BannerAdd(i as u32, lawk.banners[i].clone()))).await.unwrap();
+                            }
+                            let banner_id = lawk.banner_add(banner);
+                            lawk.authenticateds += 1;
+                            transmit.send(InitialSetupCommand::Metadata (lawk.gamesize, banner_id)).await.unwrap();
                             transmit.send(InitialSetupCommand::Finished).await.unwrap();
                         },
                         Some (ServerCommand::IoModeToggle) => {
