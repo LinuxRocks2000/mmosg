@@ -199,8 +199,6 @@ pub struct GamePieceBase {
     pub zones              : Vec<usize>
 }
 
-use tokio::sync::Mutex; // LET THE WARNING ON THIS LINE FOREVER BE A TROPHY OF OUR VICTORY AGAINST MUTEXES
-
 impl GamePieceBase {
     pub fn new(piece : Box<dyn GamePiece + Send + Sync>, x : f32, y : f32, a : f32) -> Self {
         let mut physics = piece.obtain_physics(); // Get configured physics and shape
@@ -365,6 +363,9 @@ impl GamePieceBase {
     }
 
     pub fn update(&mut self, server : &mut Server) {
+        if self.piece.do_stream_health() {
+            server.stream_health(self.exposed_properties.id, self.exposed_properties.health_properties.health / self.exposed_properties.health_properties.max_health);
+        }
         if self.exposed_properties.carrier_properties.is_carried {
             return; // quick short circuit: can't update if it's being carried, carriers freeze all activity so it's nice and ready for when it comes back out
         }
@@ -550,10 +551,6 @@ impl GamePieceBase {
 
     pub fn get_health_perc(&self) -> f32 {
         self.exposed_properties.health_properties.health/self.exposed_properties.health_properties.max_health
-    }
-
-    pub fn do_stream_health(&self) -> bool {
-        self.piece.do_stream_health()
     }
 
     pub fn capture(&self) -> u32 {
