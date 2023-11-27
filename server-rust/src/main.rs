@@ -1721,10 +1721,10 @@ async fn main(){
                                 /*if team.is_some() {
                                     lawk.teams[team.unwrap()].live_count -= 1;
                                 }*/
-                                if !server.is_io {
-                                    println!("clearink");
+                                //if !server.is_io {
+                                //    println!("clearink");
                                     server.clear_of_banner(banner);
-                                }
+                                //}
                                 println!("Player died. Living players: {}", server.living_players);
                             }
                         },
