@@ -49,7 +49,7 @@ impl Bullet {
 impl Seed {
     pub fn new() -> Self {
         Self {
-            countdown : 800 + rand::random::<u8>() % 800;
+            countdown : 800 + rand::random::<u16>() % 800
         }
     }
 }
