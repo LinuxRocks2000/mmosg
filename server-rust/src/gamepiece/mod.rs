@@ -63,7 +63,8 @@ pub struct RepeaterProperties {
 #[derive(Debug)]
 pub enum ReqZone { // Placing zone.
     NoZone, // can place anywhere
-    WithinCastleOrFort, // most common one: can only place inside your sphere of influence
+    WithinCastleOrFort, // some defensive objects can *also* be placed around forts.
+    WithinCastle, // most common one: can only place inside your sphere of influence
     AwayFromThings, // castles and forts are this: cannot be placed near things
     Both
 }
@@ -126,14 +127,14 @@ pub trait GamePiece {
     }
 
     fn req_zone(&self) -> ReqZone {
-        ReqZone::WithinCastleOrFort
+        ReqZone::WithinCastle
     }
 
     fn identify(&self) -> char;
 
     fn obtain_physics(&self) -> PhysicsObject;
 
-    fn on_die(&mut self) {
+    fn on_die(&mut self, _banner : usize, _servah : &mut Server) {
 
     }
     
@@ -482,7 +483,7 @@ impl GamePieceBase {
     }
 
     pub fn die(&mut self, server : &mut Server) {
-        self.piece.on_die();
+        self.piece.on_die(self.banner, server);
         for explosion in &self.exposed_properties.exploder {
             match explosion {
                 ExplosionMode::Radiation(size, halflife, strength) => {
@@ -603,6 +604,10 @@ impl GamePiece for Castle {
         }
     }
 
+    fn on_die(&mut self, banner : usize, server : &mut Server) {
+        server.player_died(banner);
+    }
+
     fn do_stream_health(&self) -> bool {
         true
     }
@@ -644,7 +649,7 @@ impl GamePiece for Castle {
     }
 
     fn capture(&self) -> u32 {
-        50
+        150
     }
 
     fn on_upgrade(&mut self, properties : &mut ExposedProperties, upgrade : &String) {
@@ -654,6 +659,7 @@ Upgrade tiers
 1. faster gun, but not nearly as fast as the current faster gun
 2. twice repeater gun
 3. much better range
+4. three-prong shooter
 **Cloaking**:
 1. sniper
 **Drive**:
@@ -676,6 +682,9 @@ Upgrade tiers
             },
             "b3" => {
                 properties.shooter_properties.range = 80;
+            }
+            "b4" => {
+                properties.shooter_properties.angles = vec![-0.3, 0.0, 0.3];
             }
             "f" => { // fast
                 properties.physics.speed_cap = 30.0;

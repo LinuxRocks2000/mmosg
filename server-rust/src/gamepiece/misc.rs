@@ -29,6 +29,9 @@ pub struct Radiation {
 }
 pub struct Nuke {}
 pub struct Block {}
+pub struct Seed {
+    countdown : u16
+}
 pub struct Air2Air {
     target : u32,
     count  : u32
@@ -39,6 +42,14 @@ impl Bullet {
     pub fn new() -> Self {
         Self {
 
+        }
+    }
+}
+
+impl Seed {
+    pub fn new() -> Self {
+        Self {
+            countdown : 800 + rand::random::<u8>() % 800;
         }
     }
 }
@@ -309,8 +320,8 @@ impl GamePiece for Air2Air {
 
 impl GamePiece for Wall {
     fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
-        thing.health_properties.max_health = 2.0;
-        thing.ttl = 1800;
+        thing.health_properties.max_health = 5.0;
+        thing.ttl = 2400;
     }
 
     fn identify(&self) -> char {
@@ -322,11 +333,49 @@ impl GamePiece for Wall {
     }
 
     fn obtain_physics(&self) -> PhysicsObject {
-        PhysicsObject::new(0.0, 0.0, 30.0, 30.0, 0.0)
+        PhysicsObject::new(0.0, 0.0, 60.0, 60.0, 0.0)
+    }
+
+    fn req_zone(&self) -> ReqZone {
+        ReqZone::WithinCastleOrFort
     }
 
     fn does_grant_a2a(&self) -> bool {
         true
+    }
+}
+
+impl GamePiece for Seed {
+    fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
+        thing.health_properties.max_health = 1.0;
+    }
+
+    fn identify(&self) -> char {
+        'S'
+    }
+
+    fn get_does_collide(&self, thing : char) -> bool {
+        true // they collide with literally everything 
+    }
+
+    fn obtain_physics(&self) -> PhysicsObject {
+        PhysicsObject::new(0.0, 0.0, 10.0, 10.0, 0.0)
+    }
+
+    fn req_zone(&self) -> ReqZone {
+        ReqZone::WithinCastleOrFort
+    }
+
+    fn cost(&self) -> i32 {
+        10
+    }
+
+    fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
+        self.countdown -= 1;
+        if (self.countdown <= 0) {
+            properties.health_properties.health = -1.0;
+            server.place_chest(properties.physics.shape.x, properties.physics.shape.y, None);
+        }
     }
 }
 
@@ -345,7 +394,7 @@ impl GamePiece for Chest {
     }
 
     fn get_does_collide(&self, thing : char) -> bool {
-        thing != 'c' && thing != 'F' && thing != 'B' // No castles, no forts, no blocks
+        thing != 'c' && thing != 'F' && thing != 'B' && thing != 'S' // No castles, no forts, no blocks, no seeds
     }
 
     fn capture(&self) -> u32 {
@@ -368,6 +417,10 @@ impl GamePiece for Turret {
 
     fn obtain_physics(&self) -> PhysicsObject {
         PhysicsObject::new(0.0, 0.0, 48.0, 22.0, 0.0)
+    }
+
+    fn req_zone(&self) -> ReqZone {
+        ReqZone::WithinCastleOrFort
     }
 
     fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {
@@ -402,6 +455,10 @@ impl GamePiece for MissileLaunchingSystem {
 
     fn obtain_physics(&self) -> PhysicsObject {
         PhysicsObject::new(0.0, 0.0, 48.0, 22.0, 0.0)
+    }
+
+    fn req_zone(&self) -> ReqZone {
+        ReqZone::WithinCastleOrFort
     }
 
     fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {

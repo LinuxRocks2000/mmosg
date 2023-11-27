@@ -127,7 +127,10 @@ enum ClientCommand { // Commands sent to clients
     GrantA2A (usize),
     AttachToBanner (u32, usize, i32),
     SetCastle (usize, u32), // banner to set, id of the castle
-    HealthStream (u32, f32) // id to stream, health value
+    HealthStream (u32, f32), // id to stream, health value
+    RoleCall, // the client will immediately report its banner in the WinningBanner message.
+    SomeoneDied (usize), // banner
+    Christmas
 }
 
 
@@ -150,7 +153,6 @@ pub struct Server {
     config            : Option<Arc<Config>>,
     broadcast_tx      : tokio::sync::broadcast::Sender<ClientCommand>,
     living_players    : u32,
-    winning_banner    : usize,
     isnt_rtf          : u32,
     times             : (f32, f32),
     clients_connected : u32,
@@ -246,6 +248,9 @@ impl Server {
             let banner = banner.unwrap();
             if !match zone {
                 ReqZone::NoZone => true,
+                ReqZone::WithinCastle => {
+                    self.is_inside_friendly(x, y, banner, 'c') || self.is_inside_friendly(x, y, banner, 'R')
+                },
                 ReqZone::WithinCastleOrFort => {
                     self.is_inside_friendly(x, y, banner, 'c') || self.is_inside_friendly(x, y, banner, 'F') || self.is_inside_friendly(x, y, banner, 'R')
                 },
@@ -281,6 +286,14 @@ impl Server {
 
     fn place_wall(&mut self, x : f32, y : f32, sender : Option<usize>) {
         self.place(Box::new(Wall::new()), x, y, 0.0, sender);
+    }
+
+    fn place_chest(&mut self, x : f32, y : f32, sender : Option<usize>) {
+        self.place(Box::new(Chest::new()), x, y, 0.0, sender);
+    }
+
+    fn place_seed(&mut self, x : f32, y : f32, sender : Option<usize>) {
+        self.place(Box::new(Seed::new()), x, y, 0.0, sender);
     }
 
     fn place_castle(&mut self, x : f32, y : f32, is_rtf : bool, sender : Option<usize>) -> u32 {
@@ -388,9 +401,9 @@ impl Server {
         let mut rng = rand::thread_rng();
         let x = rng.gen_range(0.0..self.gamesize);
         let y = rng.gen_range(0.0..self.gamesize);
-        let chance = rand::random::<u8>() % 100;
+        let chance = rand::random::<u16>() % 100;
         let thing : Box<dyn GamePiece + Send + Sync> = {
-            if chance < 50 {
+            if chance < 20 {
                 Box::new(Chest::new())
             }
             else {
@@ -434,6 +447,15 @@ impl Server {
         self.objects[carried].exposed_properties = carried_props;
         // NOTE: If this doesn't work because of the borrow checker mad at having 2 (3???) mutable references to self.objects, just use copying on the ExposedProperties!
         // Since carrying is a relatively rare operation, the wastefulness is not significant.
+    }
+
+    pub fn player_died(&mut self, player : usize) { // player banner, to be #exact
+        self.broadcast_tx.send(ClientCommand::SomeoneDied (player)).unwrap();
+        self.living_players -= 1;
+        if !self.is_io {
+            //self.clear_of_banner(player);
+            self.broadcast_tx.send(ClientCommand::RoleCall).unwrap();
+        }
     }
 
     fn deal_with_one_object(&mut self, x : usize, y : usize) {
@@ -655,6 +677,7 @@ impl Server {
         while i < self.objects.len() {
             let mut delted = false;
             if self.objects[i].get_banner() == banner {
+                //println!("Deleting a {} with id {}", self.objects[i].identify(), self.objects[i].get_id());
                 self.broadcast(ServerToClient::Delete (self.objects[i].get_id()));
                 self.objects.remove(i);
                 delted = true;
@@ -702,7 +725,7 @@ impl Server {
             if self.isnt_rtf == 0 {
                 self.set_mode(GameMode::Play);
             }
-            if !self.is_io {
+            /*if !self.is_io {
                 if self.living_players == 0 {
                     println!("GAME ENDS WITH A TIE");
                     self.broadcast(ServerToClient::Tie);
@@ -724,7 +747,7 @@ impl Server {
                         self.reset();
                     }
                 }
-            }
+            }*/
             if self.mode == GameMode::Play {
                 self.send_physics_updates();
             }
@@ -1279,7 +1302,9 @@ impl Client {
 async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::broadcast::Sender<ClientCommand>, commandset : tokio::sync::mpsc::Sender<ServerCommand>){
     commandset.send(ServerCommand::Connect).await.unwrap();
     let mut receiver = broadcaster.subscribe();
-    let mut moi = Client::new(client, commandset);/*
+    let mut moi = Client::new(client, commandset);
+    let mut dead = false; // TODO: move this into Client
+    /*
     if server.lock().await.passwordless {
         moi.send_singlet('p').await;
     }*/
@@ -1327,6 +1352,20 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
                             }
                         }*/
                     },
+                    Ok (ClientCommand::Christmas) => {
+                        moi.collect(10000).await;
+                    },
+                    Ok (ClientCommand::RoleCall) => {
+                        if !dead {
+                            moi.commandah.send(ServerCommand::WinningBanner (moi.banner)).await.unwrap();
+                        }
+                    },
+                    Ok (ClientCommand::SomeoneDied (banner)) => {
+                        if banner == moi.banner {
+                            moi.send_protocol_message(ServerToClient::YouLose).await;
+                            dead = true;
+                        }
+                    }
                     Ok (ClientCommand::HealthStream (id, value)) => {
                         moi.send_protocol_message(ServerToClient::HealthUpdate (id, value)).await;
                     },
@@ -1422,7 +1461,7 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
     if serverlock.is_io || serverlock.mode == GameMode::Waiting {
         serverlock.clear_of_banner(moi.banner);
     }*/
-    moi.commandah.send(ServerCommand::Disconnect (moi.mode, moi.m_castle)).await.unwrap();
+    moi.commandah.send(ServerCommand::Disconnect (moi.mode, moi.banner, moi.m_castle)).await.unwrap();
     println!("Dropped client");
 }
 
@@ -1477,12 +1516,13 @@ enum InitialSetupCommand {
 enum ServerCommand {
     Start,
     Flip,
+    Christmas,
     IoModeToggle,
     PasswordlessToggle,
     Autonomous (u32, u32, u32),
     TeamNew (String, String),
     Connect,
-    Disconnect (ClientMode, Option<u32>), // mode of the disconnecting client, castle of the disconnecting client if applicable.
+    Disconnect (ClientMode, usize, Option<u32>), // mode of the disconnecting client, banner of disconnecting client, castle of the disconnecting client if applicable.
     Broadcast (String),
     RejectObject (u32),
     PrintBanners,
@@ -1493,7 +1533,8 @@ enum ServerCommand {
     PilotRTF (u32, bool, bool, bool, bool, bool),
     Chat (usize, String, u8, Option<usize>),
     UpgradeNextTier (u32, String),
-    BeginConnection (String, String, String, tokio::sync::mpsc::Sender<InitialSetupCommand>) // password, banner, mode, outgoing pipe. god i've got to clean this up. vomiting face.
+    BeginConnection (String, String, String, tokio::sync::mpsc::Sender<InitialSetupCommand>), // password, banner, mode, outgoing pipe. god i've got to clean this up. vomiting face.
+    WinningBanner (usize) // report a banner that is alive. the server will do some routines.
 }
 
 
@@ -1521,7 +1562,6 @@ async fn main(){
         passwordless        : true,
         broadcast_tx        : broadcast_tx.clone(),
         living_players      : 0,
-        winning_banner      : 0,
         isnt_rtf            : 0,
         times               : (40.0, 20.0),
         clients_connected   : 0,
@@ -1546,21 +1586,7 @@ async fn main(){
         let init_query = "CREATE TABLE IF NOT EXISTS logins (banner TEXT, password TEXT, highscore INTEGER, wins INTEGER, losses INTEGER);CREATE TABLE IF NOT EXISTS teams_records (teamname TEXT, wins INTEGER, losses INTEGER);";
         connection.execute(init_query).unwrap();
         loop {
-            //let mut lawk = server_mutex.lock().await;
-            select! { // THIS IS BROKEN! It has constant, slow locking that bogs down performance. The reason for this is mutexes.
-/*
-| Problems caused
-|    by mutexes
-|      ____
-|     |    |
-|     |    |
-|     |    |
-|     |    |
-|     |    | Problems solved
-|     |    |    by mutexes
-|     |    |       ____
-|_____|____|______|____|______
-*/
+            select! {
                 _ = interval.tick() => {
                     use tokio::time::Instant;
                     let start = Instant::now();
@@ -1570,10 +1596,14 @@ async fn main(){
                     }
                 },
                 command = commandget.recv() => {
+                    //println!("honk");
                     match command {
                         Some (ServerCommand::Start) => {
                             server.start();
                         },
+                        Some (ServerCommand::Christmas) => {
+                            server.broadcast_tx.send(ClientCommand::Christmas).unwrap();
+                        }
                         Some (ServerCommand::RejectObject (id)) => {
                             server.delete_obj(id);
                         },
@@ -1597,6 +1627,12 @@ async fn main(){
                         },
                         Some (ServerCommand::UpgradeNextTier (item, upgrade)) => {
                             server.upgrade_next_tier(item, upgrade);
+                        },
+                        Some (ServerCommand::WinningBanner (banner)) => {
+                            if server.living_players == 1 {
+                                server.broadcast(ServerToClient::End (banner as u32));
+                                println!("{} won the game!", banner);
+                            }
                         },
                         Some (ServerCommand::PilotRTF (id, fire, left, right, airbrake, shoot)) => {
                             match server.obj_lookup(id) {
@@ -1672,10 +1708,10 @@ async fn main(){
                             server.is_io = !server.is_io;
                             println!("Set io mode to {}", server.is_io);
                         },
-                        Some (ServerCommand::Disconnect (mode, castle)) => {
+                        Some (ServerCommand::Disconnect (mode, banner, castle)) => {
                             server.clients_connected -= 1;
                             if server.clients_connected == 0 {
-                                server.clear_banners();
+                                server.reset();
                             }
                             if castle.is_some() && server.obj_lookup(castle.unwrap()).is_some() {
                                 if mode != ClientMode::RealTimeFighter {
@@ -1685,6 +1721,10 @@ async fn main(){
                                 /*if team.is_some() {
                                     lawk.teams[team.unwrap()].live_count -= 1;
                                 }*/
+                                if !server.is_io {
+                                    println!("clearink");
+                                    server.clear_of_banner(banner);
+                                }
                                 println!("Player died. Living players: {}", server.living_players);
                             }
                         },
@@ -1774,6 +1814,9 @@ async fn main(){
                                 b'w' => {
                                     server.place_wall(x, y, banner);
                                 },
+                                b'S' => {
+                                    server.place_seed(x, y, banner);
+                                },
                                 _ => {
                                     println!("The client attempted to place an object with invalid type {}", tp);
                                 }
@@ -1858,78 +1901,91 @@ async fn main(){
     });
 
     if !headless {
-        tokio::task::spawn(async move {
-            loop {
-                let command = input("");
-                let to_send = match command.as_str() {
-                    "start" => { // Notes: starting causes the deadlock, but flipping doesn't, so the problem isn't merely locking/unlocking.
-                        ServerCommand::Start
-                    },
-                    "flip" => {
-                        println!("Flipping stage");
-                        ServerCommand::Flip
-                    },
-                    "team new" => {
-                        let name = input("Team name: ");
-                        let password = input("Team password: ");
-                        ServerCommand::TeamNew(name, password)
-                    },
-                    "toggle iomode" => {
-                        ServerCommand::IoModeToggle
-                    },
-                    "toggle passwordless" => {
-                        ServerCommand::PasswordlessToggle
-                    },
-                    "broadcast" => {
-                        ServerCommand::Broadcast (input("Message: "))
-                    },
-                    "autonomous" => {
-                        let min_players = match input("Minimum player count to start: ").parse::<u32>() {
-                            Ok(num) => num,
-                            Err(_) => {
-                                println!("Invalid number.");
-                                continue;
-                            }
-                        };
-                        let max_players = match input("Maximum player count: ").parse::<u32>() {
-                            Ok(num) => num,
-                            Err(_) => {
-                                println!("Invalid number.");
-                                continue;
-                            }
-                        };
-                        let auto_timeout = match input("Timer: ").parse::<u32>() {
-                            Ok(num) => num,
-                            Err(_) => {
-                                println!("Invalid number.");
-                                continue;
-                            }
-                        };
-                        ServerCommand::Autonomous (min_players, max_players, auto_timeout)
-                    },
-                    "getbanners" => {
-                        ServerCommand::PrintBanners
-                    },
-                    "nuke" => {
-                        ServerCommand::Nuke (input("Banner to nuke: ").parse::<usize>().unwrap())
-                    }
-                    "reset" => {
-                        ServerCommand::Reset
-                    }
-                    _ => {
-                        println!("Invalid command.");
-                        continue;
-                    }
-                };
-                commandset.send(to_send).await.expect("OOOOOOPS");
-            }
-        });
+        tokio::task::spawn(cli(commandset));
+        //std::thread::spawn(|| {
+        //    cli(commandset).await;
+        //});
     }
 
     let mut websocket_server = WebSocketServer::new(port, "MMOSG".to_string()).await;
+    println!("made it here");
     loop {
         let client = websocket_server.accept::<ClientToServer, ServerToClient>().await;
         tokio::task::spawn(got_client(client, broadcast_tx.clone(), commandset_clone.clone()));
+    }
+}
+
+
+async fn cli(commandset : tokio::sync::mpsc::Sender<ServerCommand>) {
+    use tokio::io::AsyncBufReadExt;
+    let buffer = tokio::io::BufReader::new(tokio::io::stdin());
+    let mut lines = buffer.lines();
+    loop {
+        let command = match lines.next_line().await { Ok(Some(line)) => line, Ok(None) => continue, Err(_) => continue };
+        let to_send = match command.as_str() {
+            "start" => { // Notes: starting causes the deadlock, but flipping doesn't, so the problem isn't merely locking/unlocking.
+                ServerCommand::Start
+            },
+            "flip" => {
+                println!("Flipping stage");
+                ServerCommand::Flip
+            },
+            "team new" => {
+                let name = input("Team name: ");
+                let password = input("Team password: ");
+                ServerCommand::TeamNew (name, password)
+            },
+            "toggle iomode" => {
+                ServerCommand::IoModeToggle
+            },
+            "santa" => {
+                ServerCommand::Christmas
+            }
+            "toggle passwordless" => {
+                ServerCommand::PasswordlessToggle
+            },
+            "broadcast" => {
+                ServerCommand::Broadcast (input("Message: "))
+            },
+            "autonomous" => {
+                let min_players = match input("Minimum player count to start: ").parse::<u32>() {
+                    Ok(num) => num,
+                    Err(_) => {
+                        println!("Invalid number.");
+                        continue;
+                    }
+                };
+                let max_players = match input("Maximum player count: ").parse::<u32>() {
+                    Ok(num) => num,
+                    Err(_) => {
+                        println!("Invalid number.");
+                        continue;
+                    }
+                };
+                let auto_timeout = match input("Timer: ").parse::<u32>() {
+                    Ok(num) => num,
+                    Err(_) => {
+                        println!("Invalid number.");
+                        continue;
+                    }
+                };
+                ServerCommand::Autonomous (min_players, max_players, auto_timeout)
+            },
+            "getbanners" => {
+                ServerCommand::PrintBanners
+            },
+            "nuke" => {
+                ServerCommand::Nuke (input("Banner to nuke: ").parse::<usize>().unwrap())
+            }
+            "reset" => {
+                ServerCommand::Reset
+            }
+            _ => {
+                println!("Invalid command.");
+                continue;
+            }
+        };
+        commandset.send(to_send).await.expect("OOOOOOPS");
     }
 }
 
