@@ -684,7 +684,7 @@ Upgrade tiers
                 properties.shooter_properties.range = 80;
             }
             "b4" => {
-                properties.shooter_properties.angles = vec![-0.3, 0.0, 0.3];
+                properties.shooter_properties.angles = vec![-PI/2.0, -PI/2.0 - 0.2, -PI/2.0 + 0.2];
             }
             "f" => { // fast
                 properties.physics.speed_cap = 30.0;
