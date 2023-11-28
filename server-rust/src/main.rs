@@ -1709,10 +1709,6 @@ async fn main(){
                             println!("Set io mode to {}", server.is_io);
                         },
                         Some (ServerCommand::Disconnect (mode, banner, castle)) => {
-                            server.clients_connected -= 1;
-                            if server.clients_connected == 0 {
-                                server.reset();
-                            }
                             if castle.is_some() && server.obj_lookup(castle.unwrap()).is_some() {
                                 if mode != ClientMode::RealTimeFighter {
                                     server.isnt_rtf -= 1;
@@ -1726,6 +1722,10 @@ async fn main(){
                                     server.clear_of_banner(banner);
                                 //}
                                 println!("Player died. Living players: {}", server.living_players);
+                            }
+                            server.clients_connected -= 1;
+                            if server.clients_connected == 0 {
+                                server.reset();
                             }
                         },
                         Some (ServerCommand::Connect) => {
