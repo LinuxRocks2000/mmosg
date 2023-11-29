@@ -112,8 +112,7 @@ struct TeamData {
     id               : usize,
     banner_id        : usize,
     password         : Arc<String>,
-    members          : Vec <usize>, // BANNERS
-    live_count       : u32        // how many people are actually flying under this team's banner
+    members          : Vec <usize> // BANNERS in this team. Remove them when players die.
 }
 
 
@@ -206,7 +205,7 @@ impl Server {
         self.broadcast_tx.send(ClientCommand::HealthStream (id, health)).unwrap();
     }
 
-    fn upgrade_thing_to(&mut self, thing : u32, upgrade : String) {
+    /*fn upgrade_thing_to(&mut self, thing : u32, upgrade : String) {
         for object in &mut self.objects {
             if object.get_id() == thing {
                 object.upgrade(upgrade.clone());
@@ -214,7 +213,7 @@ impl Server {
                 break;
             }
         }
-    }
+    }*/
 
     fn upgrade_next_tier(&mut self, thing : u32, upgrade : String) {
         for object in &mut self.objects {
@@ -450,12 +449,24 @@ impl Server {
     }
 
     pub fn player_died(&mut self, player : usize) { // player banner, to be #exact
-        self.broadcast_tx.send(ClientCommand::SomeoneDied (player)).unwrap();
+        for i in 0..self.teams.len() {
+            if let Some(index) = self.teams[i].members.iter().position(|value| *value == player) {
+                self.teams[i].members.swap_remove(index);
+            }
+        }
         self.living_players -= 1;
+        for i in 0..self.teams.len() {
+            if self.teams[i].members.len() == self.living_players as usize {
+                self.broadcast(ServerToClient::End (self.teams[i].banner_id as u32));
+                return;
+            }
+        }
+        self.broadcast_tx.send(ClientCommand::SomeoneDied (player)).unwrap();
         if !self.is_io {
             //self.clear_of_banner(player);
             self.broadcast_tx.send(ClientCommand::RoleCall).unwrap();
         }
+        println!("Player died. Living players: {}, connected clients: {}", self.living_players, self.clients_connected);
     }
 
     fn deal_with_one_object(&mut self, x : usize, y : usize) {
@@ -700,7 +711,7 @@ impl Server {
                 if self.living_players >= self.autonomous.unwrap().0 {
                     let mut is_has_moreteam = true;
                     for team in &self.teams {
-                        if team.live_count == self.living_players { // If one team holds all the players
+                        if team.members.len() == self.living_players as usize { // If one team holds all the players
                             is_has_moreteam = false;
                             break;
                         }
@@ -928,7 +939,7 @@ impl Server {
 
     fn clear_banners(&mut self) {
         println!("Clearing banners...");
-        while self.banners.len() > 1 + self.teams.len() { // each team has a banner, lulz
+        while self.banners.len() > 1 { 
             self.banners.remove(1); // Leave the first one, which is the null banner
         }
     }
@@ -947,8 +958,7 @@ impl Server {
             id,
             banner_id: banner,
             password: Arc::new(password),
-            members: vec![],
-            live_count: 0
+            members: vec![]
         });
     }
 }
@@ -1666,6 +1676,7 @@ async fn main(){
                             }
                         },
                         Some (ServerCommand::BeginConnection (password, banner, mode, transmit)) => {
+                            let banner_id = server.banner_add(banner);
                             if server.new_user_can_join() {
                                 let thing = server.authenticate(password, mode == "spectator");
                                 match thing {
@@ -1677,8 +1688,8 @@ async fn main(){
                                         println!("Single player joined");
                                         transmit.send(InitialSetupCommand::Joined (AuthState::Single)).await.unwrap();
                                     },
-                                    AuthState::Team (_,_) => {
-                                        println!("Team player joined");
+                                    AuthState::Team (teamid, _) => {
+                                        println!("Player {} joined to team {}", server.banners[banner_id], server.banners[server.teams[teamid].banner_id]);
                                         transmit.send(InitialSetupCommand::Joined (thing)).await.unwrap();
                                     },
                                     AuthState::Spectator => {
@@ -1699,7 +1710,11 @@ async fn main(){
                             for i in 0..server.banners.len() {
                                 transmit.send(InitialSetupCommand::Message (ServerToClient::BannerAdd(i as u32, server.banners[i].clone()))).await.unwrap();
                             }
-                            let banner_id = server.banner_add(banner);
+                            for i in 0..server.teams.len() {
+                                for j in 0..server.teams[i].members.len() {
+                                    transmit.send(InitialSetupCommand::Message (ServerToClient::BannerAddToTeam(server.teams[i].members[j] as u32, server.teams[i].banner_id as u32))).await.unwrap();
+                                }
+                            }
                             server.authenticateds += 1;
                             transmit.send(InitialSetupCommand::Metadata (server.gamesize, banner_id)).await.unwrap();
                             transmit.send(InitialSetupCommand::Finished).await.unwrap();
@@ -1710,18 +1725,11 @@ async fn main(){
                         },
                         Some (ServerCommand::Disconnect (mode, banner, castle)) => {
                             if castle.is_some() && server.obj_lookup(castle.unwrap()).is_some() {
+                                server.player_died(banner);
                                 if mode != ClientMode::RealTimeFighter {
                                     server.isnt_rtf -= 1;
                                 }
-                                server.living_players -= 1;
-                                /*if team.is_some() {
-                                    lawk.teams[team.unwrap()].live_count -= 1;
-                                }*/
-                                //if !server.is_io {
-                                //    println!("clearink");
-                                    server.clear_of_banner(banner);
-                                //}
-                                println!("Player died. Living players: {}", server.living_players);
+                                server.clear_of_banner(banner);
                             }
                             server.clients_connected -= 1;
                             if server.clients_connected == 0 {
@@ -1870,7 +1878,8 @@ async fn main(){
                             }
                             server.living_players += 1;
                             if team.is_some() {
-                                server.teams[team.unwrap()].live_count += 1;
+                                server.teams[team.unwrap()].members.push(banner);
+                                server.broadcast(ServerToClient::BannerAddToTeam (banner as u32, server.teams[team.unwrap()].banner_id as u32));
                             }
                             println!("New live player. Living players: {}", server.living_players);
                         },

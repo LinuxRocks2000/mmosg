@@ -287,8 +287,8 @@ impl GamePieceBase {
         // based on a set of options stored in targeting, and set the values in targeting based on that.
         // NOTE: the comparison is *always* <; if you want to compare > values multiply by negative 1.
         for i in 0..server.objects.len() {
-            let object = &mut server.objects[i];
-            if object.get_banner() == self.get_banner() { // If you're under the same flag, skip. This has the
+            let object = &server.objects[i];
+            if object.get_banner() == self.get_banner() || server.get_team_of_banner(object.get_banner()) == server.get_team_of_banner(self.get_banner()) { // If you're under the same flag, skip. This has the
             // added benefit of making sure it never attempts to track itself.
                 continue;
             }
@@ -606,6 +606,9 @@ impl GamePiece for Castle {
 
     fn on_die(&mut self, banner : usize, server : &mut Server) {
         server.player_died(banner);
+        if !self.is_rtf {
+            server.isnt_rtf -= 1;
+        }
     }
 
     fn do_stream_health(&self) -> bool {

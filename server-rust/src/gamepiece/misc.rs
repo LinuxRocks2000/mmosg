@@ -354,7 +354,7 @@ impl GamePiece for Seed {
         'S'
     }
 
-    fn get_does_collide(&self, thing : char) -> bool {
+    fn get_does_collide(&self, _ : char) -> bool {
         true // they collide with literally everything 
     }
 
@@ -372,7 +372,7 @@ impl GamePiece for Seed {
 
     fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
         self.countdown -= 1;
-        if (self.countdown <= 0) {
+        if self.countdown <= 0 {
             properties.health_properties.health = -1.0;
             server.place_chest(properties.physics.shape.x, properties.physics.shape.y, None);
         }
