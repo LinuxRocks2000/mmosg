@@ -7,6 +7,7 @@ use crate::vector::Vector2;
 pub mod fighters;
 pub mod misc;
 pub mod npc;
+pub mod nexus;
 use crate::functions::coterminal;
 
 
@@ -288,8 +289,10 @@ impl GamePieceBase {
         // NOTE: the comparison is *always* <; if you want to compare > values multiply by negative 1.
         for i in 0..server.objects.len() {
             let object = &server.objects[i];
-            if object.get_banner() == self.get_banner() || server.get_team_of_banner(object.get_banner()) == server.get_team_of_banner(self.get_banner()) { // If you're under the same flag, skip. This has the
-            // added benefit of making sure it never attempts to track itself.
+            if object.get_id() == self.get_id() {
+                continue;
+            }
+            if object.get_banner() != 0 && (object.get_banner() == self.get_banner() || server.get_team_of_banner(object.get_banner()) == server.get_team_of_banner(self.get_banner())) { // If you're under the same flag, skip.
                 continue;
             }
             let viable = match self.exposed_properties.targeting.filter {

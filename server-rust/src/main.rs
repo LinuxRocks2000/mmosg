@@ -12,6 +12,8 @@ use crate::vector::Vector2;
 use std::vec::Vec;
 use std::sync::Arc;
 use crate::gamepiece::*;
+use crate::nexus::Nexus;
+use crate::nexus::NexusEnemy;
 use std::f32::consts::PI;
 use rand::Rng;
 use crate::gamepiece::fighters::*;
@@ -274,6 +276,10 @@ impl Server {
         self.add(la_thang, banner)
     }
 
+    fn score_to(&self, banner : usize, amount : i32) {
+        self.broadcast_tx.send(ClientCommand::ScoreTo(banner, amount)).expect("BROADCAST FAILLEDDDDDD");
+    }
+
     fn obj_lookup(&self, id : u32) -> Option<usize> { // GIVEN the ID of an OBJECT, return the INDEX or NONE if it DOES NOT EXIST.
         for i in 0..self.objects.len() {
             if self.objects[i].get_id() == id {
@@ -293,6 +299,14 @@ impl Server {
 
     fn place_seed(&mut self, x : f32, y : f32, sender : Option<usize>) {
         self.place(Box::new(Seed::new()), x, y, 0.0, sender);
+    }
+
+    fn place_nexus(&mut self, x : f32, y : f32, effect_radius : f32) -> u32 {
+        self.place(Box::new(Nexus::new(effect_radius)), x, y, 0.0, None)
+    }
+
+    fn place_nexus_enemy(&mut self, x : f32, y : f32, parent : u32) -> u32 {
+        self.place(Box::new(NexusEnemy::new(parent)), x, y, rand::random::<f32>() % (PI * 2.0), None)
     }
 
     fn place_castle(&mut self, x : f32, y : f32, is_rtf : bool, sender : Option<usize>) -> u32 {

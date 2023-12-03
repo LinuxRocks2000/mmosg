@@ -1,0 +1,15 @@
+{
+  "password": null,
+  "world_size": 5000,
+  "io_mode": true,
+  "map": [],
+  "ext": [
+    {
+        "t": "nexus",
+        "x": 2500,
+        "y": 2500,
+        "effect_radius": 5000
+    }
+  ],
+  "port": 3010
+}

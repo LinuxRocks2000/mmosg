@@ -22,7 +22,7 @@ impl BoxShape {
     }
 
     pub fn worst(&self) -> BoxShape { // The goal here is not to get an accurate bounding box, just to get a rough bounding box that is certain to contain the actual rectangle and get it really fast
-        let long = self.w + self.h; // This is guaranteed to be longer than the longest straight line you can fit in the rectangle.
+        let long = self.w + self.h; // This is guaranteed to be longer than or equal to the longest straight line you can fit in the rectangle.
         BoxShape {
             x : self.x, 
             y : self.y,

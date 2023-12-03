@@ -28,6 +28,15 @@ pub struct TeamDef {
 
 
 #[derive(Serialize, Deserialize)]
+pub struct ExtObjectDef {
+    t : String,
+    x : f32,
+    y : f32,
+    effect_radius : Option<f32> // for any ext type with an effect radius
+}
+
+
+#[derive(Serialize, Deserialize)]
 struct ServerConfigFile {
     password        : Option<String>,
     world_size      : f32,
@@ -43,7 +52,8 @@ struct ServerConfigFile {
     port            : Option<u16>,
     database        : Option<String>,
     map_anchor      : Option<String>,
-    zones           : Option<usize>
+    zones           : Option<usize>,
+    ext             : Option<Vec<ExtObjectDef>>
 }
 
 pub struct Config {
@@ -109,6 +119,21 @@ impl Config {
                 y += def.h/2.0;
             }
             server.place_block(x, y, a, def.w, def.h);
+        }
+        match &self.json.ext {
+            Some(ext) => {
+                for def in ext {
+                    match def.t.as_str() {
+                        "nexus" => {
+                            server.place_nexus(def.x, def.y, def.effect_radius.unwrap());
+                        },
+                        &_ => {
+                            panic!("Bad type in the config file!");
+                        }
+                    }
+                }
+            },
+            _ => {}
         }
         if self.json.io_mode.is_some() {
             server.is_io = self.json.io_mode.unwrap();
