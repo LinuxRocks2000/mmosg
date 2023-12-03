@@ -301,7 +301,7 @@ impl GamePieceBase {
                 },
                 TargetingFilter::Fighters => {
                     match object.identify() {
-                        'f' | 'h' | 'R' | 't' | 's' => true,
+                        'f' | 'h' | 'R' | 't' | 's' | '&' | 'C' => true,
                         _ => false
                     }
                 },

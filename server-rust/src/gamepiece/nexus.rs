@@ -35,7 +35,7 @@ impl NexusEnemy {
     pub fn new(parent : u32) -> NexusEnemy {
         NexusEnemy {
             parent,
-            countdown : 300
+            countdown : 0//300
         }
     }
 }
@@ -141,6 +141,7 @@ impl GamePiece for NexusEnemy {
         thing.collision_info.damage = 3.0;
         thing.targeting.mode = TargetingMode::Id(self.parent);
         thing.targeting.filter = TargetingFilter::Any;
+        thing.physics.velocity = Vector2::new_from_manda(10.0, rand::random::<f32>() * std::f32::consts::PI * 2.0);
     }
 
     fn identify(&self) -> char {
@@ -156,7 +157,7 @@ impl GamePiece for NexusEnemy {
                 else {
                     properties.physics.set_angle(properties.physics.angle() * 0.999 + goal.angle() * 0.001);
                 }
-                let thrust = Vector2::new_from_manda(0.3, properties.physics.angle());
+                let thrust = Vector2::new_from_manda(0.25, properties.physics.angle());
                 properties.physics.velocity = properties.physics.velocity + thrust;
                 properties.physics.velocity = properties.physics.velocity * 0.99;
             }
