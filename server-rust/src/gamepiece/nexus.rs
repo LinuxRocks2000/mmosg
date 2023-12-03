@@ -62,7 +62,7 @@ impl GamePiece for Nexus {
             properties.health_properties.health = properties.health_properties.max_health;
             for obj in &mut server.objects {
                 if self.players.contains(&obj.get_banner()) && (obj.identify() == 'c' || obj.identify() == 'R') {
-                    obj.exposed_properties.health_properties.health = 0.0;
+                    obj.exposed_properties.health_properties.health = -1.0;
                 }
             }
         }

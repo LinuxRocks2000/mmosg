@@ -2,6 +2,7 @@
   "password": null,
   "world_size": 5000,
   "io_mode": true,
+  "permit_npcs": false,
   "map": [],
   "ext": [
     {
