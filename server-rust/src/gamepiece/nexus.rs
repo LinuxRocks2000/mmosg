@@ -49,8 +49,8 @@ impl GamePiece for Nexus {
         PhysicsObject::new(0.0, 0.0, 60.0, 60.0, 0.0)
     }
 
-    fn get_does_collide(&self, _id : char) -> bool {
-        true
+    fn get_does_collide(&self, id : char) -> bool {
+        id != 'w'
     }
 
     fn identify(&self) -> char {

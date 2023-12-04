@@ -329,7 +329,7 @@ impl GamePiece for Wall {
     }
 
     fn get_does_collide(&self, thing : char) -> bool {
-        thing != 'c' && thing != 'F' && thing != 'B' // No castles, no forts, no blocks
+        thing != 'c' && thing != 'F' && thing != 'B' && thing != 'N' && thing != 'w' // No castles, no forts, no blocks, no nexuses, no other walls
     }
 
     fn obtain_physics(&self) -> PhysicsObject {

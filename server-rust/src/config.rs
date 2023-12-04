@@ -126,6 +126,14 @@ impl Config {
                     match def.t.as_str() {
                         "nexus" => {
                             server.place_nexus(def.x, def.y, def.effect_radius.unwrap());
+                            server.place_wall(def.x - 60.0, def.y - 60.0, None);
+                            server.place_wall(def.x       , def.y - 60.0, None);
+                            server.place_wall(def.x + 60.0, def.y - 60.0, None);
+                            server.place_wall(def.x - 60.0, def.y, None);
+                            server.place_wall(def.x + 60.0, def.y, None);
+                            server.place_wall(def.x - 60.0, def.y + 60.0, None);
+                            server.place_wall(def.x       , def.y + 60.0, None);
+                            server.place_wall(def.x + 60.0, def.y + 60.0, None);
                         },
                         &_ => {
                             panic!("Bad type in the config file!");
