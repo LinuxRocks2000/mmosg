@@ -292,7 +292,7 @@ impl GamePieceBase {
             if object.get_id() == self.get_id() {
                 continue;
             }
-            if object.get_banner() != 0 && (object.get_banner() == self.get_banner() || server.get_team_of_banner(object.get_banner()) == server.get_team_of_banner(self.get_banner())) { // If you're under the same flag, skip.
+            if object.get_banner() != 0 && (object.get_banner() == self.get_banner() || (server.get_team_of_banner(object.get_banner()) == server.get_team_of_banner(self.get_banner())) && server.get_team_of_banner(self.get_banner()).is_some()) { // If you're under the same flag, skip.
                 continue;
             }
             let viable = match self.exposed_properties.targeting.filter {
