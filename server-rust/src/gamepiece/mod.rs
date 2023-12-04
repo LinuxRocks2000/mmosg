@@ -629,9 +629,6 @@ impl GamePiece for Castle {
 
     fn on_die(&mut self, banner : usize, server : &mut Server) {
         server.player_died(banner);
-        if !self.is_rtf {
-            server.isnt_rtf -= 1;
-        }
     }
 
     fn do_stream_health(&self) -> bool {

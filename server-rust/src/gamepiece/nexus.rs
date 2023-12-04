@@ -130,6 +130,7 @@ impl GamePiece for Nexus {
                 server.objects[en_ind].exposed_properties.goal_x = properties.physics.cx();
                 server.objects[en_ind].exposed_properties.goal_y = properties.physics.cy();
                 server.objects[en_ind].exposed_properties.collision_info.worthit = false;
+                server.objects[en_ind].exposed_properties.physics.velocity = Vector2::new_from_manda(20.0, rand::random::<f32>() * std::f32::consts::PI * 2.0);
                 server.objects[en_ind].death_subscribe(properties.id);
             }
         }

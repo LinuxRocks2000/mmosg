@@ -475,11 +475,9 @@ impl Server {
                 return;
             }
         }
+        self.isnt_rtf = 0;
         self.broadcast_tx.send(ClientCommand::SomeoneDied (player)).unwrap();
-        if !self.is_io {
-            //self.clear_of_banner(player);
-            self.broadcast_tx.send(ClientCommand::RoleCall).unwrap();
-        }
+        self.broadcast_tx.send(ClientCommand::RoleCall).unwrap();
         println!("Player died. Living players: {}, connected clients: {}", self.living_players, self.clients_connected);
     }
 
@@ -1396,7 +1394,7 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
                     },
                     Ok (ClientCommand::RoleCall) => {
                         if !dead {
-                            moi.commandah.send(ServerCommand::WinningBanner (moi.banner)).await.unwrap();
+                            moi.commandah.send(ServerCommand::WinningBanner (moi.banner, moi.mode == ClientMode::RealTimeFighter)).await.unwrap();
                         }
                     },
                     Ok (ClientCommand::SomeoneDied (banner)) => {
@@ -1573,7 +1571,7 @@ enum ServerCommand {
     Chat (usize, String, u8, Option<usize>),
     UpgradeNextTier (u32, String),
     BeginConnection (String, String, String, tokio::sync::mpsc::Sender<InitialSetupCommand>), // password, banner, mode, outgoing pipe. god i've got to clean this up. vomiting face.
-    WinningBanner (usize) // report a banner that is alive. the server will do some routines.
+    WinningBanner (usize, bool) // report a banner that is alive and whether or not the player is an rtf. the server will do some routines.
 }
 
 
@@ -1667,10 +1665,13 @@ async fn main(){
                         Some (ServerCommand::UpgradeNextTier (item, upgrade)) => {
                             server.upgrade_next_tier(item, upgrade);
                         },
-                        Some (ServerCommand::WinningBanner (banner)) => {
-                            if server.living_players == 1 {
+                        Some (ServerCommand::WinningBanner (banner, is_rtf)) => {
+                            if !server.is_io && server.living_players == 1 {
                                 server.broadcast(ServerToClient::End (banner as u32));
                                 println!("{} won the game!", banner);
+                            }
+                            if !is_rtf {
+                                server.isnt_rtf += 1;
                             }
                         },
                         Some (ServerCommand::PilotRTF (id, fire, left, right, airbrake, shoot)) => {
@@ -1758,8 +1759,8 @@ async fn main(){
                                 if mode != ClientMode::RealTimeFighter {
                                     server.isnt_rtf -= 1;
                                 }
-                                server.clear_of_banner(banner);
                             }
+                            server.clear_of_banner(banner);
                             server.clients_connected -= 1;
                             if server.clients_connected == 0 {
                                 server.reset();
