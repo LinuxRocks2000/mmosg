@@ -510,7 +510,9 @@ impl Server {
                         let amount = self.objects[x].capture().await as i32;
                         killah.unwrap().lock().await.collect(amount).await;
                     }*/
-                    self.broadcast_tx.send(ClientCommand::ScoreTo (self.objects[y].get_banner(), self.objects[x].capture() as i32)).expect("Broadcast failed");
+                    if self.objects[x].does_give_score() {
+                        self.broadcast_tx.send(ClientCommand::ScoreTo (self.objects[y].get_banner(), self.objects[x].capture() as i32)).expect("Broadcast failed");
+                    }
                     if self.objects[x].does_grant_a2a() {
                         self.broadcast_tx.send(ClientCommand::GrantA2A (self.objects[y].get_banner())).expect("Broadcast failed part 2");
                     }
@@ -526,7 +528,9 @@ impl Server {
                         let amount = self.objects[y].capture().await as i32;
                         killah.unwrap().lock().await.collect(amount).await;
                     }*/
-                    self.broadcast_tx.send(ClientCommand::ScoreTo (self.objects[x].get_banner(), self.objects[y].capture() as i32)).expect("Broadcast failed");
+                    if self.objects[y].does_give_score() {
+                        self.broadcast_tx.send(ClientCommand::ScoreTo (self.objects[x].get_banner(), self.objects[y].capture() as i32)).expect("Broadcast failed");
+                    }
                     if self.objects[y].does_grant_a2a() {
                         self.broadcast_tx.send(ClientCommand::GrantA2A (self.objects[x].get_banner())).expect("Broadcast failed part 2");
                     }
@@ -674,7 +678,18 @@ impl Server {
             // Do death checks a bit late (pun not intended) so objects have a chance to self-rescue.
             if self.objects[i].dead() {
                 unsafe {
-                    (*(&mut self.objects as *mut Vec<GamePieceBase>))[i].die(self);
+                    let objects = &mut self.objects as *mut Vec<GamePieceBase>;
+                    let obj = &mut (*objects)[i];
+                    obj.die(self);
+                    for subscriber in 0..obj.death_subscriptions.len() {
+                        let thing = self.obj_lookup(obj.death_subscriptions[subscriber]);
+                        match thing {
+                            Some(thing) => {
+                                (*(&mut self.objects as *mut Vec<GamePieceBase>))[thing].on_subscribed_death(obj, self);
+                            }
+                            None => {}
+                        }
+                    }
                 }
                 self.broadcast(ServerToClient::Delete (self.objects[i].get_id()));
                 self.objects.remove(i);

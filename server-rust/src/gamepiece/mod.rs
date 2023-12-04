@@ -182,12 +182,17 @@ pub trait GamePiece {
     fn do_stream_health(&self) -> bool {
         false
     }
+
+    fn on_subscribed_death(&mut self, _me : &mut ExposedProperties, _them : &mut GamePieceBase, _servah : &mut Server) {
+
+    }
 }
 
 
 #[derive(Copy, Clone)]
 pub struct CollisionInfo {
-    pub damage : f32, // Damage done constantly to any objects colliding with this object
+    pub damage  : f32, // Damage done constantly to any objects colliding with this object
+    pub worthit : bool
 }
 
 pub struct GamePieceBase {
@@ -198,7 +203,8 @@ pub struct GamePieceBase {
     broadcasts             : Vec<ServerToClient>,
     forts                  : Vec<u32>,
     pub upgrades           : Vec<String>,
-    pub zones              : Vec<usize>
+    pub zones              : Vec<usize>,
+    pub death_subscriptions: Vec<u32>
 }
 
 impl GamePieceBase {
@@ -227,7 +233,8 @@ impl GamePieceBase {
                 },
                 value : piece.identify(),
                 collision_info : CollisionInfo {
-                    damage : 1.0
+                    damage : 1.0,
+                    worthit: true
                 },
                 targeting : Targeting {
                     mode : TargetingMode::None,
@@ -257,12 +264,25 @@ impl GamePieceBase {
             broadcasts : vec![],
             forts : vec![],
             piece,
-            upgrades : vec![]
+            upgrades : vec![],
+            death_subscriptions : vec![]
         };
         thing.piece.construct(&mut thing.exposed_properties);
         thing.exposed_properties.health_properties.health = thing.exposed_properties.health_properties.max_health;
         thing.exposed_properties.repeater.repeats = thing.exposed_properties.repeater.max_repeats;
         thing
+    }
+
+    pub fn does_give_score(&self) -> bool {
+        self.exposed_properties.collision_info.worthit
+    }
+
+    pub fn on_subscribed_death(&mut self, other : &mut GamePieceBase, server : &mut Server) {
+        self.piece.on_subscribed_death(&mut self.exposed_properties, other, server);
+    }
+
+    pub fn death_subscribe(&mut self, other : u32) {
+        self.death_subscriptions.push(other);
     }
 
     pub fn identify(&self) -> char {

@@ -6,12 +6,12 @@ use crate::Vector2;
 use crate::TargetingMode;
 use crate::TargetingFilter;
 use crate::functions::coterminal;
+use crate::gamepiece::GamePieceBase;
 
 
 pub struct Nexus {
     place_counter : u16,
     effect_radius : f32,
-    enemies       : Vec<u32>,
     players       : Vec<usize> // list of player banners currently in this nexus; refreshed every tick at the moment. OPTIMIZATION PENDING.
 }
 
@@ -25,8 +25,7 @@ impl Nexus {
         Nexus {
             effect_radius,
             place_counter : 100,
-            players: vec![],
-            enemies: vec![]
+            players: vec![]
         }
     }
 }
@@ -55,6 +54,12 @@ impl GamePiece for Nexus {
 
     fn identify(&self) -> char {
         'N'
+    }
+
+    fn on_subscribed_death(&mut self, _me : &mut ExposedProperties, them : &mut GamePieceBase, server : &mut Server) {
+        for player in &self.players {
+            server.score_to(*player, them.capture() as i32);
+        }
     }
 
     fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
@@ -103,31 +108,36 @@ impl GamePiece for Nexus {
                     }
                     _ => {}
                 }
-                self.enemies.push(server.place_nexus_enemy(properties.physics.cx() + x, properties.physics.cy() + y, properties.id));
-            }
-        }
-        let mut enemy : usize = 0;
-        while enemy < self.enemies.len() {
-            if match server.obj_lookup(self.enemies[enemy]) {
-                Some(index) => {
-                    server.objects[index].exposed_properties.health_properties.health <= 0.0
-                }
-                None => true
-            } {
-                self.enemies.swap_remove(enemy);
-                for player in &self.players {
-                    server.score_to(*player, 10);
-                }
-            }
-            else {
-                enemy += 1;
+                x += properties.physics.cx();
+                y += properties.physics.cy();
+                let a = rand::random::<f32>() * std::f32::consts::PI * 2.0;
+                let enemy = match rand::random::<u16>() % 4 {
+                    0 => {
+                        server.place_missile(x, y, a, None)
+                    }
+                    1 => {
+                        server.place_basic_fighter(x, y, a, None)
+                    }
+                    2 => {
+                        server.place_sniper(x, y, a, None)
+                    }
+                    3 => {
+                        server.place_basic_fighter(x, y, a, None)
+                    }
+                    _ => {0}
+                };
+                let en_ind = server.obj_lookup(enemy).unwrap();
+                server.objects[en_ind].exposed_properties.goal_x = properties.physics.cx();
+                server.objects[en_ind].exposed_properties.goal_y = properties.physics.cy();
+                server.objects[en_ind].exposed_properties.collision_info.worthit = false;
+                server.objects[en_ind].death_subscribe(properties.id);
             }
         }
     }
 }
 
 
-impl GamePiece for NexusEnemy {
+impl GamePiece for NexusEnemy { // DEPRECATION NOTICE: this is no longer in use.
     fn obtain_physics(&self) -> PhysicsObject {
         PhysicsObject::new(0.0, 0.0, 48.0, 20.0, 0.0)
     }
