@@ -83,7 +83,7 @@ impl GamePiece for Nexus {
         if self.players.len() > 0 {
             self.place_counter -= 1;
             if self.place_counter == 0 {
-                self.place_counter = 100 + rand::random::<u16>() % 200;
+                self.place_counter = 200 + rand::random::<u16>() % 300;
                 let pick_pos = coterminal(rand::random::<f32>() * self.effect_radius, self.effect_radius) - self.effect_radius/2.0;
                 println!("Pick pos: {}", pick_pos);
                 let mut x : f32 = 0.0;
@@ -119,7 +119,7 @@ impl GamePiece for Nexus {
                         server.place_basic_fighter(x, y, a, None)
                     }
                     2 => {
-                        server.place_sniper(x, y, a, None)
+                        server.place_tie_fighter(x, y, a, None)
                     }
                     3 => {
                         server.place_basic_fighter(x, y, a, None)
