@@ -959,6 +959,9 @@ impl Server {
         while self.objects.len() > 0 {
             self.objects.remove(0);
         }
+        self.isnt_rtf = 0;
+        self.living_players = 0;
+        self.clients_connected = 0;
         self.set_mode(GameMode::Waiting);
         self.clear_banners();
         self.load_config();
