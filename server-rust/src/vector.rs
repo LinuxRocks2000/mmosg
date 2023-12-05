@@ -48,7 +48,7 @@ impl Vector2 {
         self.set_angle(ang * std::f32::consts::PI/180.0);
     }
 
-    pub fn set_magnitude(&mut self, mag : f32){
+    pub fn set_magnitude(&mut self, mag : f32) {
         self.set_manda(mag, self.angle());
     }
 
@@ -125,6 +125,10 @@ impl Vector2 {
         let rel = *self - origin; // get where the vector is relative to origin
         origin + rel.rot(amount) // rotate the origin-d vector, and add back origin
     }
+
+    pub fn perpendicular(&self) -> Self { // returns a right-flipped vector. useful for projection.
+        Vector2::new_from_manda(self.magnitude(), self.angle() + PI/2.0)
+    }
 }
 
 impl std::fmt::Debug for Vector2 {
@@ -170,6 +174,15 @@ impl std::ops::Sub <Vector2> for Vector2 {
             x : self.x - other.x,
             y : self.y - other.y
         }
+    }
+}
+
+impl std::ops::Sub <f32> for Vector2 {
+    type Output = Vector2;
+
+    fn sub (mut self, other : f32) -> Vector2 {
+        self.set_magnitude(self.magnitude() - other);
+        self
     }
 }
 

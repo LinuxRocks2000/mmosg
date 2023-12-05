@@ -39,6 +39,35 @@ impl NexusEnemy {
     }
 }
 
+enum NexusStrategy {
+    Spam, // literally just hit the target
+    PullUp (f32), // go straight along the target path until it hits a certain distance from the target, then aim forwards
+    PullAround (f32), // go off to the side and then aim directly at it; guaranteed to not score hits while it moves along the path, which is the point
+}
+
+impl NexusStrategy {
+    fn calculate(&self, target : Vector2, this : Vector2) -> (Vector2, f32) {
+        match self {
+            NexusStrategy::Spam => {
+                (target, (target - this).angle())
+            },
+            NexusStrategy::PullUp (d) => {
+                (this + (target - this - *d), (target - this).angle())
+            },
+            NexusStrategy::PullAround (d) => {
+                let mut dif = this - target;
+                dif = dif.perpendicular();
+                dif.set_magnitude(*d);
+                if rand::random::<u8>() % 2 == 0 {
+                    dif *= -1.0;
+                }
+                let r_pos = target + dif;
+                (r_pos, (target - r_pos).angle())
+            }
+        }
+    }
+}
+
 impl GamePiece for Nexus {
     fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
         thing.health_properties.max_health = 3.0;
@@ -111,24 +140,41 @@ impl GamePiece for Nexus {
                 x += properties.physics.cx();
                 y += properties.physics.cy();
                 let a = rand::random::<f32>() * std::f32::consts::PI * 2.0;
+                let mut strategy : NexusStrategy = NexusStrategy::Spam;
                 let enemy = match rand::random::<u16>() % 4 {
                     0 => {
                         server.place_missile(x, y, a, None)
                     }
                     1 => {
+                        strategy = match rand::random::<u8>() % 3 { 0 => NexusStrategy::PullUp (200.0 + rand::random::<f32>() * 400.0), 1 => NexusStrategy::PullAround (200.0 + rand::random::<f32>() * 400.0), _ => NexusStrategy::Spam };
                         server.place_basic_fighter(x, y, a, None)
                     }
                     2 => {
+                        strategy = match rand::random::<u8>() % 3 { 0 => NexusStrategy::PullUp (200.0 + rand::random::<f32>() * 400.0), 1 => NexusStrategy::PullAround (200.0 + rand::random::<f32>() * 400.0), _ => NexusStrategy::Spam };
                         server.place_tie_fighter(x, y, a, None)
                     }
                     3 => {
-                        server.place_basic_fighter(x, y, a, None)
+                        strategy = NexusStrategy::PullAround (400.0 + rand::random::<f32>() * 600.0);
+                        server.place_sniper(x, y, a, None)
                     }
                     _ => {0}
                 };
                 let en_ind = server.obj_lookup(enemy).unwrap();
-                server.objects[en_ind].exposed_properties.goal_x = properties.physics.cx();
-                server.objects[en_ind].exposed_properties.goal_y = properties.physics.cy();
+                let mut t_v = properties.physics.vector_position();
+                if rand::random::<u8>() <= 128 && self.players.len() > 0 {
+                    use rand::seq::SliceRandom;
+                    let target = *self.players.choose(&mut rand::thread_rng()).unwrap();
+                    println!("Attacking {}", target);
+                    for obj in &server.objects {
+                        if obj.get_banner() == target && obj.identify() == 'c' { // it only attacks stationary castles; rtfs are too mobile
+                            t_v = obj.exposed_properties.physics.vector_position();
+                        }
+                    }
+                }
+                let (t_v, angle) = strategy.calculate(t_v, Vector2::new(x, y));
+                server.objects[en_ind].exposed_properties.goal_x = t_v.x;
+                server.objects[en_ind].exposed_properties.goal_y = t_v.y;
+                server.objects[en_ind].exposed_properties.goal_a = angle;
                 server.objects[en_ind].exposed_properties.collision_info.worthit = false;
                 server.objects[en_ind].exposed_properties.physics.velocity = Vector2::new_from_manda(20.0, rand::random::<f32>() * std::f32::consts::PI * 2.0);
                 server.objects[en_ind].death_subscribe(properties.id);
