@@ -51,7 +51,6 @@ pub struct Client {
     team              : Option<usize>,
     commandah         : tokio::sync::mpsc::Sender<ServerCommand>,
     is_team_leader    : bool,
-    places_this_turn  : u8,
     kys               : bool,
     a2a               : u16,
     walls_remaining   : u16,
@@ -1008,7 +1007,6 @@ impl Client {
             team: None,
             commandah,
             is_team_leader: false,
-            places_this_turn: 0,
             kys: false,
             a2a: 0,
             walls_cap : 2,
@@ -1052,15 +1050,12 @@ impl Client {
         if self.is_authorized {
             match message {
                 ClientToServer::Place (x, y, tp) => {
-                    if self.places_this_turn >= 30 {
-                        return;
-                    }
                     if self.game_cmode == GameMode::Play && tp != b'c' { // if it is trying to place an object, but it isn't strat mode or waiting mode and it isn't placing a castle
                         // originally, this retaliated, but now it just refuses. the retaliation was a problem.
                         println!("ATTEMPT TO PLACE IN PLAY MODE");
                         return; // can't place things if it ain't strategy. Also this is poison.
                     }
-                    self.places_this_turn += 1;/*
+                    /*
                     if x < 0.0 || x > server.gamesize || y < 0.0 || y > server.gamesize { 
                         self.kys = true;
                         return;
@@ -1369,7 +1364,6 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
                     Ok (ClientCommand::Tick (counter, mode)) => {
                         moi.game_cmode = mode;
                         if mode == GameMode::Play { // if it's play mode
-                            moi.places_this_turn = 0;
                             moi.walls_remaining = moi.walls_cap; // it can't use 'em until next turn, ofc
                         }
                         //let mut schlock = server.lock().await;
