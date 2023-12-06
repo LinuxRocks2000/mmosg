@@ -474,7 +474,7 @@ impl Server {
                 return;
             }
         }
-        self.isnt_rtf = 0;
+        self.isnt_rtf -= 1;
         self.broadcast_tx.send(ClientCommand::SomeoneDied (player)).unwrap();
         self.broadcast_tx.send(ClientCommand::RoleCall).unwrap();
         println!("Player died. Living players: {}, connected clients: {}", self.living_players, self.clients_connected);
@@ -1391,7 +1391,9 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
                     },
                     Ok (ClientCommand::RoleCall) => {
                         if !dead {
-                            moi.commandah.send(ServerCommand::WinningBanner (moi.banner, moi.mode == ClientMode::RealTimeFighter)).await.unwrap();
+                            match moi.commandah.send(ServerCommand::WinningBanner (moi.banner, moi.mode == ClientMode::RealTimeFighter)).await {
+                                _ => {}
+                            }; // ignore the error; eventually, we may handle it. The error here is because we're trying to send winner information to a disconnected client.
                         }
                     },
                     Ok (ClientCommand::SomeoneDied (banner)) => {
@@ -1667,9 +1669,6 @@ async fn main(){
                                 server.broadcast(ServerToClient::End (banner as u32));
                                 println!("{} won the game!", banner);
                             }
-                            if !is_rtf {
-                                server.isnt_rtf += 1;
-                            }
                         },
                         Some (ServerCommand::PilotRTF (id, fire, left, right, airbrake, shoot)) => {
                             match server.obj_lookup(id) {
@@ -1753,9 +1752,6 @@ async fn main(){
                         Some (ServerCommand::Disconnect (mode, banner, castle)) => {
                             if castle.is_some() && server.obj_lookup(castle.unwrap()).is_some() {
                                 server.player_died(banner);
-                                if mode != ClientMode::RealTimeFighter {
-                                    server.isnt_rtf -= 1;
-                                }
                             }
                             server.clear_of_banner(banner);
                             server.clients_connected -= 1;
