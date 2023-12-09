@@ -83,7 +83,8 @@ pub enum ServerToClient {
     New (u32, u8, f32, f32, f32, bool, u32, f32, f32), // id, type, x, y, a, editable, banner, w, h
     MoveObjectFull (u32, f32, f32, f32, f32, f32), // id, x, y, a, w, h. inefficient (25 bytes altogether); use a smaller one like MoveObjectXY or MoveObjectA or MoveObjectXYA if possible.
     Delete (u32),
-    Tie
+    Tie,
+    SeedCompletion (u32, u16) // seed id, completion value
 }
 
 #[derive(ProtocolFrame, Debug, Clone)]
@@ -825,7 +826,7 @@ impl Server {
 
     fn start(&mut self) {
         if self.mode == GameMode::Waiting {
-            for _ in 0..((self.gamesize * self.gamesize) / 1000000.0) as u32 { // One per 1,000,000 square pixels, or 200, whichever is lower.
+            for _ in 0..std::cmp::min(((self.gamesize * self.gamesize) / 1000000.0) as u32, 300) { // One per 1,000,000 square pixels, or 200, whichever is lower.
                 self.place_random_rubble();
             }
             self.set_mode(GameMode::Strategy);

@@ -111,7 +111,8 @@ pub struct ExposedProperties { // everything a GamePieceBase wants to expose to 
     pub goal_y             : f32,
     pub goal_a             : f32,
     pub ttl                : i32, // ttl of < 0 means ttl does nothing. ttl of 0 means die. ttl of anything higher means subtract one every update.
-    pub repeater           : RepeaterProperties
+    pub repeater           : RepeaterProperties,
+    pub banner             : usize
 }
 
 
@@ -223,6 +224,7 @@ impl GamePieceBase {
                     health : 1.0,
                     passive_heal : 0.0
                 },
+                banner: 0,
                 shooter_properties : ShooterProperties {
                     shoot : false,
                     counter : 0,
@@ -559,6 +561,7 @@ impl GamePieceBase {
 
     pub fn set_banner(&mut self, new : usize) {
         self.banner = new;
+        self.exposed_properties.banner = new;
     }
 
     pub fn set_id(&mut self, id : u32) {

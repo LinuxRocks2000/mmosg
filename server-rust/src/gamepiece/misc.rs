@@ -30,7 +30,8 @@ pub struct Radiation {
 pub struct Nuke {}
 pub struct Block {}
 pub struct Seed {
-    countdown : u16
+    countdown : u16,
+    max_countdown : u16
 }
 pub struct Air2Air {
     target : u32,
@@ -48,8 +49,10 @@ impl Bullet {
 
 impl Seed {
     pub fn new() -> Self {
+        let countd = 800 + rand::random::<u16>() % 800;
         Self {
-            countdown : 800 + rand::random::<u16>() % 800
+            countdown : countd,
+            max_countdown : countd
         }
     }
 }
@@ -376,6 +379,7 @@ impl GamePiece for Seed {
             properties.health_properties.health = -1.0;
             server.place_chest(properties.physics.shape.x, properties.physics.shape.y, None);
         }
+        server.send_to(ServerToClient::SeedCompletion (properties.id, ((self.countdown as u32 * 100) / (self.max_countdown as u32)) as u16), properties.banner);
     }
 }
 

@@ -1,0 +1,15 @@
+{ 
+    "password": null,
+    "world_size": 60000,
+    "io_mode": true,
+    "permit_npcs": false,
+    "map": [],
+    "autonomous": {
+        "min_players": 2,
+        "max_players": 100,
+        "timeout": 1000
+    },
+    "database": "frog_world.db",
+    "zones": 1,
+    "port": 3003
+}
