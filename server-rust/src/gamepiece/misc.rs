@@ -19,7 +19,9 @@ pub struct Wall {}
 pub struct Chest {}
 pub struct Turret {}
 pub struct MissileLaunchingSystem {}
-pub struct Carrier {}
+pub struct Carrier {
+    angle_v : f32
+}
 pub struct Radiation {
     halflife : f32,
     strength : f32,
@@ -60,7 +62,7 @@ impl Seed {
 impl Carrier {
     pub fn new() -> Self {
         Self {
-
+            angle_v : 0.0
         }
     }
 }
@@ -152,9 +154,10 @@ impl GamePiece for Carrier {
         thing.health_properties.max_health = 1.0;
         thing.health_properties.passive_heal = 0.02;
         thing.collision_info.damage = 1.0;
-        thing.physics.speed_cap = 15.0;
+        thing.physics.speed_cap = 12.0;
         thing.carrier_properties.space_remaining = 10;
-        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't', 'T'];
+        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't', 'T', 'n', 'm'];
+        thing.health_properties.prevent_friendly_fire = true;
     }
 
     fn obtain_physics(&self) -> PhysicsObject {
@@ -166,16 +169,30 @@ impl GamePiece for Carrier {
     }
     
     fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {
-        let mut thrust = Vector2::new(properties.goal_x - properties.physics.cx(), properties.goal_y - properties.physics.cy());
-        if thrust.magnitude() < 10.0 {
-            properties.physics.set_angle(properties.goal_a);
-            properties.physics.velocity = properties.physics.velocity * 0.7; // airbrake
+        let vec_to = Vector2::new(properties.goal_x - properties.physics.cx(), properties.goal_y - properties.physics.cy());
+        let mut thrust = Vector2::new_from_manda(1.0, properties.physics.angle());
+        let goal_angle : f32;
+        let mut l = loopize(properties.physics.angle(), vec_to.angle());
+        if l.abs() > 3.0 * PI/4.0 {
+            l = loopize(properties.physics.angle() - PI, vec_to.angle());
+            thrust *= -1.0;
+        }
+        if vec_to.magnitude() < 10.0 {
+            goal_angle = properties.goal_a;
         }
         else {
-            thrust = thrust.unit() * 0.05;
-            properties.physics.set_angle(thrust.angle());
+            goal_angle = vec_to.angle();
             properties.physics.velocity = properties.physics.velocity + thrust;
+            let mut perp = vec_to.perpendicular();
+            let dot = properties.physics.velocity.dot(perp);
+            perp.set_magnitude(dot / 2.0);
+            properties.physics.velocity += perp * -1.0;
         }
+        if loopize(properties.physics.velocity.angle(), vec_to.angle()).abs() > PI / 2.0 { // if it's going in the wrong direction
+            properties.physics.velocity *= 0.5; // airbrake
+        }
+        self.angle_v = -l * 3.0/4.0;
+        properties.physics.set_angle(properties.physics.angle() + self.angle_v);
     }
 
     fn cost(&self) -> i32 {
@@ -193,12 +210,35 @@ impl GamePiece for Carrier {
         }
         me.health_properties.max_health += thing.health_properties.max_health;
         me.health_properties.health += thing.health_properties.max_health;
+        /* Carrier berths are like
+             y
+ |    |    |    |    |    |
+ | 0  | 2  | 4  | 6  | 8  |
+x|----|----|----|----|----|
+ | 1  | 3  | 5  | 7  | 9  |
+ |    |    |    |    |    |
+        */
+        let d = thing.physics.vector_position().rotate_about(me.physics.vector_position(), me.physics.angle()) - me.physics.vector_position();
+        if d.y > 0.0 {
+            thing.carrier_properties.berth = 1;
+        }
+        else {
+            thing.carrier_properties.berth = 0;
+        }
+        // each berth is 80x80
+        let mut berthy = ((d.x / 80.0).round() + 2.0) as usize; // rotated coordinate plane
+        if berthy > 4 {
+            berthy = 4;
+        }
+        thing.carrier_properties.berth += berthy * 2;
     }
 
-    fn carry_iter(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties, berth : usize) -> bool {
-        thing.physics.set_angle(me.physics.angle());
-        let berth_y : bool = berth % 2 == 0;
-        let berth_x : usize = berth / 2; // stupid rust can't handle my u8s so I have to waste a lot of space on a usize for these.
+    fn carry_iter(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties) -> bool {
+        if !thing.carrier_properties.can_update {
+            thing.physics.set_angle(me.physics.angle());
+        }
+        let berth_y : bool = thing.carrier_properties.berth % 2 == 0;
+        let berth_x : usize = thing.carrier_properties.berth / 2; // stupid rust can't handle my u8s so I have to waste a lot of space on a usize for these.
         let mut new_pos = Vector2::new(me.physics.cx() - me.physics.shape.w/2.0 + berth_x as f32 * 80.0 + 35.0, me.physics.cy() - me.physics.shape.h/2.0 + if berth_y { 35.0 } else { me.physics.shape.h - 35.0 });
         new_pos = new_pos.rotate_about(Vector2::new(me.physics.cx(), me.physics.cy()), me.physics.angle());
         thing.physics.set_cx(new_pos.x);
@@ -209,16 +249,16 @@ impl GamePiece for Carrier {
         false
     }
 
-    fn drop_carry(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties, berth : usize) {
-        let berth_y : bool = berth % 2 == 0;
-        let berth_x : usize = berth / 2;
+    fn drop_carry(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties) {
+        let berth_y : bool = thing.carrier_properties.berth % 2 == 0;
+        let berth_x : usize = thing.carrier_properties.berth / 2;
         let outsize =  if thing.physics.shape.w > thing.physics.shape.h { thing.physics.shape.w } else { thing.physics.shape.h };
         let mut new_pos = Vector2::new(me.physics.cx() - me.physics.shape.w/2.0 + berth_x as f32 * 80.0 + 35.0, if berth_y { me.physics.shape.y - me.physics.shape.h/2.0 - outsize } else { me.physics.shape.h/2.0 + me.physics.shape.y + outsize });
         new_pos = new_pos.rotate_about(Vector2::new(me.physics.cx(), me.physics.cy()), me.physics.angle());
         thing.physics.set_cx(new_pos.x);
         thing.physics.set_cy(new_pos.y);
         if thing.value == 'h' {
-            me.physics.speed_cap -= 1.0;
+            me.physics.speed_cap -= 3.0;
         }
         me.health_properties.max_health -= thing.health_properties.max_health;
     }
@@ -413,6 +453,7 @@ impl GamePiece for Turret {
         thing.targeting.range = (0.0, 500.0);
         thing.shooter_properties.shoot = true;
         thing.shooter_properties.counter = 30;
+        thing.carrier_properties.can_update = true;
     }
 
     fn identify(&self) -> char {
@@ -427,12 +468,21 @@ impl GamePiece for Turret {
         ReqZone::WithinCastleOrFort
     }
 
-    fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {
+    fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
         match properties.targeting.vector_to {
             Some(vector) => {
                 properties.physics.set_angle(vector.angle());
+                properties.shooter_properties.suppress = false;
+                if properties.carrier_properties.is_carried {
+                    let parent = server.obj_lookup(properties.carrier_properties.carrier);
+                    properties.shooter_properties.suppress = false;
+                }
             },
-            None => {}
+            None => {
+                if properties.carrier_properties.is_carried {
+                    properties.shooter_properties.suppress = true;
+                }
+            }
         };
     }
 
@@ -451,6 +501,7 @@ impl GamePiece for MissileLaunchingSystem {
         thing.shooter_properties.counter = 150;
         thing.shooter_properties.range = 1000;
         thing.collision_info.damage = 5.0;
+        thing.carrier_properties.can_update = true;
     }
 
     fn identify(&self) -> char {

@@ -84,7 +84,9 @@ pub enum ServerToClient {
     MoveObjectFull (u32, f32, f32, f32, f32, f32), // id, x, y, a, w, h. inefficient (25 bytes altogether); use a smaller one like MoveObjectXY or MoveObjectA or MoveObjectXYA if possible.
     Delete (u32),
     Tie,
-    SeedCompletion (u32, u16) // seed id, completion value
+    SeedCompletion (u32, u16), // seed id, completion value
+    Carry (u32, u32), // carrier, carried
+    UnCarry (u32) // no longer carrying this guy
 }
 
 #[derive(ProtocolFrame, Debug, Clone)]
@@ -454,16 +456,18 @@ impl Server {
         self.objects[carrier].exposed_properties.carrier_properties.carrying.push(carry_id);
         self.objects[carrier].exposed_properties.carrier_properties.space_remaining -= 1;
         self.objects[carried].exposed_properties.carrier_properties.is_carried = true;
+        self.objects[carried].exposed_properties.carrier_properties.carrier = self.objects[carrier].get_id();
         let mut carrier_props = self.objects[carrier].exposed_properties.clone();
         let mut carried_props = self.objects[carried].exposed_properties.clone();
         self.objects[carrier].piece.on_carry(&mut carrier_props, &mut carried_props);
         self.objects[carrier].exposed_properties = carrier_props;
         self.objects[carried].exposed_properties = carried_props;
+        self.send_to(ServerToClient::Carry (self.objects[carrier].get_id(), self.objects[carried].get_id()), self.objects[carried].get_banner());
         // NOTE: If this doesn't work because of the borrow checker mad at having 2 (3???) mutable references to self.objects, just use copying on the ExposedProperties!
         // Since carrying is a relatively rare operation, the wastefulness is not significant.
     }
 
-    pub fn player_died(&mut self, player : usize) { // player banner, to be #exact
+    pub fn player_died(&mut self, player : usize, was_rtf : bool) { // player banner, to be #exact
         for i in 0..self.teams.len() {
             if let Some(index) = self.teams[i].members.iter().position(|value| *value == player) {
                 self.teams[i].members.swap_remove(index);
@@ -476,7 +480,9 @@ impl Server {
                 return;
             }
         }
-        self.isnt_rtf -= 1;
+        if !was_rtf {
+            self.isnt_rtf -= 1;
+        }
         self.broadcast_tx.send(ClientCommand::SomeoneDied (player)).unwrap();
         self.broadcast_tx.send(ClientCommand::RoleCall).unwrap();
         println!("Player died. Living players: {}, connected clients: {}", self.living_players, self.clients_connected);
@@ -1762,7 +1768,8 @@ async fn main(){
                         },
                         Some (ServerCommand::Disconnect (mode, banner, castle)) => {
                             if castle.is_some() && server.obj_lookup(castle.unwrap()).is_some() {
-                                server.player_died(banner);
+                                server.player_died(banner, mode == ClientMode::RealTimeFighter);
+                                println!("yuh");
                             }
                             server.clear_of_banner(banner);
                             server.clients_connected -= 1;

@@ -26,7 +26,8 @@ pub struct ShooterProperties {
 pub struct HealthProperties {
     max_health   : f32,
     health       : f32,
-    passive_heal : f32
+    passive_heal : f32,
+    prevent_friendly_fire : bool
 }
 
 
@@ -85,7 +86,10 @@ pub struct CarrierProperties {
     pub space_remaining : u32, // amount of remaining carrier space
     pub carrying : Vec<u32>, // list of things it is carrying
     pub does_accept : Vec<char>, // list of types it'll carry
-    pub is_carried : bool // if it's being carried at the moment. objects being carried cannot shoot and don't do any collision damage.
+    pub can_update : bool, // if it can update safely while being carried
+    pub is_carried : bool, // if it's being carried at the moment. objects being carried cannot shoot and don't do any collision damage.
+    pub berth      : usize, // if it's being carried, this is the berth it's in.
+    pub carrier    : u32 // who is carrying us
 }
 
 
@@ -168,11 +172,11 @@ pub trait GamePiece {
 
     }
 
-    fn carry_iter(&mut self, _properties : &mut ExposedProperties, _thing : &mut ExposedProperties, _index : usize) -> bool { // called to iterate over every carried object every update
+    fn carry_iter(&mut self, _properties : &mut ExposedProperties, _thing : &mut ExposedProperties) -> bool { // called to iterate over every carried object every update
         false
     }
 
-    fn drop_carry(&mut self, _properties : &mut ExposedProperties, _thing : &mut ExposedProperties, _index : usize) { // called to iterate over every carried object every update
+    fn drop_carry(&mut self, _properties : &mut ExposedProperties, _thing : &mut ExposedProperties) { // called to iterate over every carried object every update
         
     }
 
@@ -222,7 +226,8 @@ impl GamePieceBase {
                 health_properties : HealthProperties {
                     max_health : 2.0,
                     health : 1.0,
-                    passive_heal : 0.0
+                    passive_heal : 0.0,
+                    prevent_friendly_fire : false
                 },
                 banner: 0,
                 shooter_properties : ShooterProperties {
@@ -255,7 +260,10 @@ impl GamePieceBase {
                     space_remaining : 0,
                     carrying : vec![],
                     does_accept : vec![],
-                    is_carried : false
+                    is_carried : false,
+                    can_update : false,
+                    berth : 0,
+                    carrier : 0
                 },
                 repeater : RepeaterProperties {
                     repeats     : 0,
@@ -309,6 +317,10 @@ impl GamePieceBase {
         // The goal here is to compare the entire list of objects by some easily derived numerical component,
         // based on a set of options stored in targeting, and set the values in targeting based on that.
         // NOTE: the comparison is *always* <; if you want to compare > values multiply by negative 1.
+        let mut carrier = None;
+        if self.exposed_properties.carrier_properties.is_carried {
+            carrier = server.obj_lookup(self.exposed_properties.carrier_properties.carrier);
+        }
         for i in 0..server.objects.len() {
             let object = &server.objects[i];
             if object.get_id() == self.get_id() {
@@ -317,7 +329,7 @@ impl GamePieceBase {
             if object.get_banner() != 0 && (object.get_banner() == self.get_banner() || (server.get_team_of_banner(object.get_banner()) == server.get_team_of_banner(self.get_banner())) && server.get_team_of_banner(self.get_banner()).is_some()) { // If you're under the same flag, skip.
                 continue;
             }
-            let viable = match self.exposed_properties.targeting.filter {
+            let mut viable = match self.exposed_properties.targeting.filter {
                 TargetingFilter::Any => {
                     true
                 },
@@ -337,6 +349,18 @@ impl GamePieceBase {
                     object.identify() == 'R'
                 }
             };
+            match carrier {
+                Some(carrier) => {
+                    let mut bullet = object.exposed_properties.physics.vector_position() - self.exposed_properties.physics.vector_position(); // anticipate a bullet position. we won't target this if shooting at it would damage the carrier.
+                    bullet.set_magnitude(50.0);
+                    bullet += self.exposed_properties.physics.vector_position();
+                    // TODO: check more bullet possibilities
+                    if server.objects[carrier].exposed_properties.physics.shape.contains(bullet) {
+                        viable = false; // this is not a viable match if firing on it would damage our carrier
+                    }
+                }
+                None => {}
+            }
             if viable {
                 let val = match self.exposed_properties.targeting.mode {
                     TargetingMode::Nearest => {
@@ -389,11 +413,14 @@ impl GamePieceBase {
     }
 
     pub fn update(&mut self, server : &mut Server) {
+        if self.exposed_properties.carrier_properties.is_carried {
+            self.exposed_properties.health_properties.health = self.exposed_properties.health_properties.max_health;
+        }
+        if self.exposed_properties.carrier_properties.is_carried && !self.exposed_properties.carrier_properties.can_update {
+            return; // quick short circuit: can't update if it's being carried, carriers freeze all activity so it's nice and ready for when it comes back out
+        }
         if self.piece.do_stream_health() {
             server.stream_health(self.exposed_properties.id, self.exposed_properties.health_properties.health / self.exposed_properties.health_properties.max_health);
-        }
-        if self.exposed_properties.carrier_properties.is_carried {
-            return; // quick short circuit: can't update if it's being carried, carriers freeze all activity so it's nice and ready for when it comes back out
         }
         let mut i : usize = 0;
         while i < self.forts.len() {
@@ -424,8 +451,9 @@ impl GamePieceBase {
             let obj = server.obj_lookup(self.exposed_properties.carrier_properties.carrying[i]);
             match obj {
                 Some(obj) => {
-                    if self.piece.carry_iter(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties, i) { // drop the carried object
-                        self.piece.drop_carry(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties, i);
+                    if self.piece.carry_iter(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties) { // drop the carried object
+                        self.piece.drop_carry(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties);
+                        server.send_to(ServerToClient::UnCarry (server.objects[obj].get_id()), server.objects[obj].get_banner());
                         self.exposed_properties.carrier_properties.space_remaining += 1;
                         server.objects[obj].exposed_properties.carrier_properties.is_carried = false;
                     }
@@ -532,6 +560,7 @@ impl GamePieceBase {
             let obj = server.obj_lookup(*carried).unwrap(); // if it's being carried, it's guaranteed to not be deleted, so unwrapping is safe.
             // MAY BE PROBLEMATIC!
             server.objects[obj].exposed_properties.carrier_properties.is_carried = false;
+            server.send_to(ServerToClient::UnCarry (*carried), server.objects[obj].get_banner());
             server.objects[obj].exposed_properties.goal_x = server.objects[obj].exposed_properties.physics.cx();
             server.objects[obj].exposed_properties.goal_y = server.objects[obj].exposed_properties.physics.cy();
             server.objects[obj].exposed_properties.goal_a = server.objects[obj].exposed_properties.physics.angle();
@@ -640,7 +669,8 @@ impl GamePiece for Castle {
     }
 
     fn on_die(&mut self, banner : usize, server : &mut Server) {
-        server.player_died(banner);
+        server.player_died(banner, self.is_rtf);
+        println!("bluh");
     }
 
     fn do_stream_health(&self) -> bool {
