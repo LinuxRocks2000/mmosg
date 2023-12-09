@@ -435,11 +435,15 @@ impl GamePieceBase {
         }
         let mut i : usize = 0;
         while i < self.exposed_properties.carrier_properties.carrying.len() { // remove everything from the list AFTER they've been properly released, so reordering doesn't cause problems above
-            let obj = server.obj_lookup(self.exposed_properties.carrier_properties.carrying[i]).unwrap(); // unwrap is guaranteed safe here because carried objects can't under any circumstances be deleted
-            // TODO: optimize, we should only need one lookup per object for this instead of 2.
-            if !server.objects[obj].exposed_properties.carrier_properties.is_carried { // if it's been marked not-carried, so we still have an uncarried object in our carry list - problematic!
-                self.exposed_properties.carrier_properties.carrying.remove(i);
-                continue; // don't let it increment i
+            let obj = server.obj_lookup(self.exposed_properties.carrier_properties.carrying[i]);
+            match obj {
+                Some(obj) => {    // TODO: optimize, we should only need one lookup per object for this instead of 2.
+                    if !server.objects[obj].exposed_properties.carrier_properties.is_carried { // if it's been marked not-carried, so we still have an uncarried object in our carry list - problematic!
+                        self.exposed_properties.carrier_properties.carrying.remove(i);
+                        continue; // don't let it increment i
+                    }
+                }
+                None => {}
             }
             i += 1;
         }
