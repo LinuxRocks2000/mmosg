@@ -120,6 +120,7 @@ struct TeamData {
 #[derive(Debug, Clone)]
 enum ClientCommand { // Commands sent to clients
     Send (ServerToClient),
+    SendTo (ServerToClient, usize),
     Tick (u32, GameMode),
     ScoreTo (usize, i32),
     CloseAll,
@@ -839,6 +840,10 @@ impl Server {
         self.broadcast_tx.send(ClientCommand::Send (message)).expect("Broadcast failed");
     }
 
+    fn send_to(&self, message : ServerToClient, banner : usize) {
+        self.broadcast_tx.send(ClientCommand::SendTo (message, banner)).expect("Broadcast Failed");
+    }
+
     fn chat(&self, content : String, sender : usize, priority : u8, to_whom : Option<usize>) {
         self.broadcast_tx.send(ClientCommand::ChatRoom (content, sender, priority, to_whom)).expect("Chat message failed");
     }
@@ -1408,6 +1413,11 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
                     Ok (ClientCommand::Send (message)) => {
                         moi.send_protocol_message(message).await;
                     },
+                    Ok (ClientCommand::SendTo (message, banner)) => {
+                        if moi.banner == banner {
+                            moi.send_protocol_message(message).await;
+                        }
+                    }
                     Ok (ClientCommand::SetCastle (banner, id)) => {
                         if moi.banner == banner {
                             moi.m_castle = Some(id);
