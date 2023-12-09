@@ -421,11 +421,16 @@ impl GamePieceBase {
         self.exposed_properties.physics.update();
         self.piece.update(&mut self.exposed_properties, server);
         for i in 0..self.exposed_properties.carrier_properties.carrying.len() {
-            let obj = server.obj_lookup(self.exposed_properties.carrier_properties.carrying[i]).unwrap(); // unwrap is guaranteed safe here because carried objects can't under any circumstances be deleted
-            if self.piece.carry_iter(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties, i) { // drop the carried object
-                self.piece.drop_carry(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties, i);
-                self.exposed_properties.carrier_properties.space_remaining += 1;
-                server.objects[obj].exposed_properties.carrier_properties.is_carried = false;
+            let obj = server.obj_lookup(self.exposed_properties.carrier_properties.carrying[i]);
+            match obj {
+                Some(obj) => {
+                    if self.piece.carry_iter(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties, i) { // drop the carried object
+                        self.piece.drop_carry(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties, i);
+                        self.exposed_properties.carrier_properties.space_remaining += 1;
+                        server.objects[obj].exposed_properties.carrier_properties.is_carried = false;
+                    }
+                }
+                None => {}
             }
         }
         let mut i : usize = 0;

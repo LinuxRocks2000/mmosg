@@ -154,7 +154,7 @@ impl GamePiece for Carrier {
         thing.collision_info.damage = 1.0;
         thing.physics.speed_cap = 15.0;
         thing.carrier_properties.space_remaining = 10;
-        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't'];
+        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't', 'T'];
     }
 
     fn obtain_physics(&self) -> PhysicsObject {
