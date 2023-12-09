@@ -127,7 +127,7 @@ impl GamePiece for Sniper {
     }
 
     fn obtain_physics(&self) -> PhysicsObject {
-        PhysicsObject::new(0.0, 0.0, 48.0, 17.0, 0.0)
+        PhysicsObject::new(0.0, 0.0, 72.0, 20.0, 0.0)
     }
 
     fn identify(&self) -> char {
