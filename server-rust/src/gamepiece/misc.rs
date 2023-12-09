@@ -152,7 +152,7 @@ impl GamePiece for Carrier {
         thing.health_properties.max_health = 1.0;
         thing.health_properties.passive_heal = 0.02;
         thing.collision_info.damage = 1.0;
-        thing.physics.speed_cap = 3.0;
+        thing.physics.speed_cap = 15.0;
         thing.carrier_properties.space_remaining = 10;
         thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't'];
     }
@@ -189,7 +189,7 @@ impl GamePiece for Carrier {
     fn on_carry(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties) { // when a new object becomes carried by this
         thing.goal_x = -1.0;
         if thing.value == 'h' {
-            me.physics.speed_cap += 1.0;
+            me.physics.speed_cap += 3.0;
         }
         me.health_properties.max_health += thing.health_properties.max_health;
         me.health_properties.health += thing.health_properties.max_health;
