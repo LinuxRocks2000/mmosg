@@ -171,17 +171,15 @@ impl GamePiece for Carrier {
     fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {
         let vec_to = Vector2::new(properties.goal_x - properties.physics.cx(), properties.goal_y - properties.physics.cy());
         let mut thrust = Vector2::new_from_manda(1.0, properties.physics.angle());
-        let goal_angle : f32;
         let mut l = loopize(properties.physics.angle(), vec_to.angle());
         if l.abs() > 3.0 * PI/4.0 {
             l = loopize(properties.physics.angle() - PI, vec_to.angle());
             thrust *= -1.0;
         }
         if vec_to.magnitude() < 10.0 {
-            goal_angle = properties.goal_a;
+            l = loopize(properties.physics.angle(), properties.goal_a);
         }
         else {
-            goal_angle = vec_to.angle();
             properties.physics.velocity = properties.physics.velocity + thrust;
             let mut perp = vec_to.perpendicular();
             let dot = properties.physics.velocity.dot(perp);
