@@ -459,7 +459,10 @@ impl Server {
         self.objects[carried].exposed_properties.carrier_properties.carrier = self.objects[carrier].get_id();
         let mut carrier_props = self.objects[carrier].exposed_properties.clone();
         let mut carried_props = self.objects[carried].exposed_properties.clone();
-        self.objects[carrier].piece.on_carry(&mut carrier_props, &mut carried_props);
+        unsafe { // gotta hate borrow checking
+            //let mut objects = *(&mut self.objects as *mut Vec<GamePieceBase>);
+            (*(&mut self.objects as *mut Vec<GamePieceBase>))[carrier].piece.on_carry(&mut carrier_props, &mut carried_props, self);
+        }
         self.objects[carrier].exposed_properties = carrier_props;
         self.objects[carried].exposed_properties = carried_props;
         self.send_to(ServerToClient::Carry (self.objects[carrier].get_id(), self.objects[carried].get_id()), self.objects[carried].get_banner());

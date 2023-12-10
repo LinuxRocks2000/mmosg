@@ -168,7 +168,7 @@ pub trait GamePiece {
 
     }
 
-    fn on_carry(&mut self, _properties : &mut ExposedProperties, _thing : &mut ExposedProperties) { // when a new object becomes carried by this
+    fn on_carry(&mut self, _properties : &mut ExposedProperties, _thing : &mut ExposedProperties, _server : &mut Server) { // when a new object becomes carried by this
 
     }
 
@@ -404,12 +404,12 @@ impl GamePieceBase {
         self.broadcasts.push(message);
     }
 
-    pub async fn on_carry(&mut self, mut thing : GamePieceBase) {
+    pub async fn on_carry(&mut self, mut thing : GamePieceBase, server : &mut Server) {
         /*self.exposed_properties.carrier_properties.carrying.push(thing.get_id());
         self.exposed_properties.carrier_properties.space_remaining -= 1;
         thing.exposed_properties.carrier_properties.is_carried = true;
         thing.exposed_properties.physics.velocity = Vector2::empty();*/
-        self.piece.on_carry(&mut self.exposed_properties, &mut thing.exposed_properties);
+        self.piece.on_carry(&mut self.exposed_properties, &mut thing.exposed_properties, server);
     }
 
     pub fn update(&mut self, server : &mut Server) {

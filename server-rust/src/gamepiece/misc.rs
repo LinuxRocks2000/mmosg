@@ -203,7 +203,7 @@ impl GamePiece for Carrier {
         true
     }
 
-    fn on_carry(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties) { // when a new object becomes carried by this
+    fn on_carry(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties, server : &mut Server) { // when a new object becomes carried by this
         thing.goal_x = -1.0;
         if thing.value == 'h' {
             me.physics.speed_cap += 3.0;
@@ -219,18 +219,63 @@ x|----|----|----|----|----|
  |    |    |    |    |    |
         */
         let d = thing.physics.vector_position().rotate_about(me.physics.vector_position(), me.physics.angle()) - me.physics.vector_position();
-        if d.y > 0.0 {
-            thing.carrier_properties.berth = 1;
+        let mut berthx = if d.y > 0.0 {
+            1
         }
         else {
-            thing.carrier_properties.berth = 0;
-        }
+            0
+        };
+        thing.carrier_properties.berth = berthx;
         // each berth is 80x80
         let mut berthy = ((d.x / 80.0).round() + 2.0) as usize; // rotated coordinate plane
         if berthy > 4 {
             berthy = 4;
         }
-        thing.carrier_properties.berth += berthy * 2;
+        let mut berth_map = [[false; 8]; 2];
+        for id in &me.carrier_properties.carrying {
+            if *id == thing.id {
+                continue;
+            }
+            match server.obj_lookup(*id) {
+                Some (i) => {
+                    let berthv = server.objects[i].exposed_properties.carrier_properties.berth;
+                    let berthx = berthv % 2;
+                    let berthy = berthv / 2;
+                    berth_map[berthx][berthy] = true;
+                },
+                None => {}
+            }
+        }
+        if berth_map[berthx][berthy] {
+            let mut best_d = 5;
+            let mut best_m = 0;
+            for y in 0..5 {
+                if !berth_map[berthx][y] {
+                    let m = (berthy as i32 - y as i32).abs() as usize;
+                    if m < best_d {
+                        best_d = m;
+                        best_m = y;
+                    }
+                }
+            }
+            if best_d < 5 {
+                berthy = best_m;
+            }
+            else {
+                for y in 0..5 {
+                    if !berth_map[1 - berthx][y] {
+                        let m = (berthy as i32 - y as i32).abs() as usize;
+                        if m < best_d {
+                            best_d = m;
+                            best_m = y;
+                        }
+                    }
+                }
+                berthx = 1 - berthx;
+                berthy = best_m;
+            }
+        }
+        thing.carrier_properties.berth = berthx + berthy * 2;
     }
 
     fn carry_iter(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties) -> bool {
@@ -474,7 +519,6 @@ impl GamePiece for Turret {
                 properties.physics.set_angle(vector.angle());
                 properties.shooter_properties.suppress = false;
                 if properties.carrier_properties.is_carried {
-                    let parent = server.obj_lookup(properties.carrier_properties.carrier);
                     properties.shooter_properties.suppress = false;
                 }
             },
