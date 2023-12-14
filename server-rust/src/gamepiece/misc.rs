@@ -19,6 +19,10 @@ pub struct Wall {}
 pub struct Chest {}
 pub struct Turret {}
 pub struct MissileLaunchingSystem {}
+pub struct GreenThumb {
+    countdown : u16,
+    seeds : Vec<u32>
+}
 pub struct Carrier {
     angle_v : f32
 }
@@ -133,6 +137,29 @@ impl Block {
     }
 }
 
+impl GreenThumb {
+    pub fn new() -> Self {
+        Self {
+            countdown : 10,
+            seeds : vec![]
+        }
+    }
+}
+
+
+impl GamePiece for GreenThumb {
+    fn construct(&self, thing : &mut ExposedProperties) {
+        
+    }
+
+    fn identify(&self) -> char {
+        'G'
+    }
+
+    fn obtain_physics(&self) -> PhysicsObject {
+        PhysicsObject::new(0.0, 0.0, 20.0, 10.0, 0.0);
+    }
+}
 
 impl GamePiece for Bullet {
     fn construct<'a>(&'a self, thing : &mut ExposedProperties) {

@@ -28,6 +28,13 @@ pub struct TeamDef {
 
 
 #[derive(Serialize, Deserialize)]
+pub struct Times {
+    move_ships : f32,
+    play : f32
+}
+
+
+#[derive(Serialize, Deserialize)]
 pub struct ExtObjectDef {
     t : String,
     x : f32,
@@ -53,7 +60,8 @@ struct ServerConfigFile {
     database        : Option<String>,
     map_anchor      : Option<String>,
     zones           : Option<usize>,
-    ext             : Option<Vec<ExtObjectDef>>
+    ext             : Option<Vec<ExtObjectDef>>,
+    times           : Option<Times>
 }
 
 pub struct Config {
@@ -102,6 +110,13 @@ impl Config {
             for team in self.json.teams.as_ref().unwrap() {
                 server.new_team(team.name.clone(), team.password.clone());
             }
+        }
+        match &self.json.times {
+            Some(times) => {
+                server.times.0 = times.move_ships;
+                server.times.1 = times.play;
+            },
+            None => {}
         }
         let is_tl = match &self.json.map_anchor {
             Some (anchor) => anchor == "topleft",

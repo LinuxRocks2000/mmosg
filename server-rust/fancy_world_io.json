@@ -94,6 +94,10 @@
         "max_players": 100,
         "timeout": 1000
     },
+    "times": {
+        "move_ships": 40,
+        "play": 20
+    },
     "database": "fancy_world_io.db",
     "zones": 4
 }

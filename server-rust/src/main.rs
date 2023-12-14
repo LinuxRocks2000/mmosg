@@ -189,15 +189,15 @@ impl Server {
         return moidah;
     }
 
-    fn object_field_check(&self, object : BoxShape, x : f32, y : f32) -> bool {
-        object.ong_fr().bigger(800.0).contains(Vector2::new(x, y)) // this ong frs it first because contains doesn't really work on rotated objects
+    fn object_field_check(&self, object : BoxShape, x : f32, y : f32, radius : f32) -> bool { // radius is usually 800.0 because 400.0 to a side.
+        object.ong_fr().bigger(radius).contains(Vector2::new(x, y)) // this ong frs it first because contains doesn't really work on rotated objects
     }
 
-    fn is_inside_friendly(&self, x : f32, y : f32, banner : usize, tp : char) -> bool {
+    fn is_inside_friendly(&self, x : f32, y : f32, banner : usize, tp : char, field_width : f32) -> bool {
         for obj in &self.objects {
             if obj.identify() == tp {
                 if obj.get_banner() == banner {
-                    if self.object_field_check(obj.exposed_properties.physics.shape, x, y) {
+                    if self.object_field_check(obj.exposed_properties.physics.shape, x, y, field_width) {
                         return true; // short circuit
                     }
                 }
@@ -238,7 +238,7 @@ impl Server {
 
     fn is_clear(&self, x : f32, y : f32) -> bool {
         for obj in &self.objects {
-            if self.object_field_check(obj.exposed_properties.physics.shape, x, y) {
+            if self.object_field_check(obj.exposed_properties.physics.shape, x, y, 800.0) {
                 return false; // short circuit
             }
         }
@@ -253,16 +253,16 @@ impl Server {
             if !match zone {
                 ReqZone::NoZone => true,
                 ReqZone::WithinCastle => {
-                    self.is_inside_friendly(x, y, banner, 'c') || self.is_inside_friendly(x, y, banner, 'R')
+                    self.is_inside_friendly(x, y, banner, 'c', 1600.0) || self.is_inside_friendly(x, y, banner, 'R', 800.0)
                 },
                 ReqZone::WithinCastleOrFort => {
-                    self.is_inside_friendly(x, y, banner, 'c') || self.is_inside_friendly(x, y, banner, 'F') || self.is_inside_friendly(x, y, banner, 'R')
+                    self.is_inside_friendly(x, y, banner, 'c', 1600.0) || self.is_inside_friendly(x, y, banner, 'F', 800.0) || self.is_inside_friendly(x, y, banner, 'R', 800.0)
                 },
                 ReqZone::AwayFromThings => {
                     self.is_clear(x, y)
                 },
                 ReqZone::Both => {
-                    self.is_clear(x, y) || self.is_inside_friendly(x, y, banner, 'c') || self.is_inside_friendly(x, y, banner, 'F')
+                    self.is_clear(x, y) || self.is_inside_friendly(x, y, banner, 'c', 1600.0) || self.is_inside_friendly(x, y, banner, 'F', 800.0)
                 }
             } {
                 //sender.as_mut().unwrap().kys = true; // drop the client, something nefarious is going on
