@@ -162,6 +162,10 @@ impl GamePiece for GoldBar {
         'g'
     }
 
+    fn req_zone(&self) -> ReqZone {
+        ReqZone::WithinCastleOrFort
+    }
+
     fn cost(&self) -> i32 {
         100
     }
@@ -176,8 +180,16 @@ impl GamePiece for GoldBar {
 }
 
 impl GamePiece for GreenThumb {
-    fn construct(&self, thing : &mut ExposedProperties) {
+    fn construct(&self, _thing : &mut ExposedProperties) {
         
+    }
+
+    fn req_zone(&self) -> ReqZone {
+        ReqZone::WithinCastleOrFort
+    }
+
+    fn get_does_collide(&self, id : char) -> bool {
+        id != 'T'
     }
 
     fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
@@ -584,7 +596,7 @@ impl GamePiece for Turret {
         ReqZone::WithinCastleOrFort
     }
 
-    fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
+    fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {
         match properties.targeting.vector_to {
             Some(vector) => {
                 properties.physics.set_angle(vector.angle());
@@ -599,6 +611,10 @@ impl GamePiece for Turret {
                 }
             }
         };
+    }
+
+    fn get_does_collide(&self, id : char) -> bool {
+        id != 'G'
     }
 
     fn cost(&self) -> i32 {

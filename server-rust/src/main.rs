@@ -13,7 +13,7 @@ use std::vec::Vec;
 use std::sync::Arc;
 use crate::gamepiece::*;
 use crate::nexus::Nexus;
-use crate::nexus::NexusEnemy;
+//use crate::nexus::NexusEnemy;
 use std::f32::consts::PI;
 use rand::Rng;
 use crate::gamepiece::fighters::*;
@@ -319,9 +319,9 @@ impl Server {
         self.place(Box::new(Nexus::new(effect_radius)), x, y, 0.0, None)
     }
 
-    fn place_nexus_enemy(&mut self, x : f32, y : f32, parent : u32) -> u32 {
+    /*fn place_nexus_enemy(&mut self, x : f32, y : f32, parent : u32) -> u32 {
         self.place(Box::new(NexusEnemy::new(parent)), x, y, rand::random::<f32>() % (PI * 2.0), None)
-    }
+    }*/
 
     fn place_castle(&mut self, x : f32, y : f32, is_rtf : bool, sender : Option<usize>) -> u32 {
         self.place(Box::new(Castle::new(is_rtf)), x, y, 0.0, sender)
@@ -1721,7 +1721,7 @@ async fn main(){
                         Some (ServerCommand::UpgradeNextTier (item, upgrade)) => {
                             server.upgrade_next_tier(item, upgrade);
                         },
-                        Some (ServerCommand::WinningBanner (banner, is_rtf)) => {
+                        Some (ServerCommand::WinningBanner (banner, _is_rtf)) => {
                             if !server.is_io && server.living_players == 1 {
                                 server.broadcast(ServerToClient::End (banner as u32));
                                 println!("{} won the game!", banner);
