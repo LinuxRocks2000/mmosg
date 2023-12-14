@@ -311,6 +311,10 @@ impl Server {
         self.place(Box::new(GreenThumb::new()), x, y, 0.0, sender);
     }
 
+    fn place_gold_bar(&mut self, x : f32, y : f32, sender : Option<usize>) {
+        self.place(Box::new(GoldBar::new()), x, y, 0.0, sender);
+    }
+
     fn place_nexus(&mut self, x : f32, y : f32, effect_radius : f32) -> u32 {
         self.place(Box::new(Nexus::new(effect_radius)), x, y, 0.0, None)
     }
@@ -519,7 +523,7 @@ impl Server {
             if self.objects[x].get_does_collide(self.objects[y].identify()) {
                 let dmg = self.objects[y].get_collision_info().damage;
                 self.objects[x].damage(dmg);
-                if self.objects[x].dead() && (self.objects[y].get_banner() != self.objects[x].get_banner()) {
+                if self.objects[x].dead() && (self.objects[y].get_banner() != self.objects[x].get_banner() || self.objects[x].identify() == 'g') {
                     /*let killah = self.get_client_by_banner(self.objects[y].get_banner()).await;
                     if killah.is_some() {
                         let amount = self.objects[x].capture().await as i32;
@@ -537,7 +541,7 @@ impl Server {
             if self.objects[y].get_does_collide(self.objects[x].identify()) {
                 let dmg = self.objects[x].get_collision_info().damage;
                 self.objects[y].damage(dmg);
-                if self.objects[y].dead() && (self.objects[y].get_banner() != self.objects[x].get_banner()) {
+                if self.objects[y].dead() && (self.objects[y].get_banner() != self.objects[x].get_banner() || self.objects[y].identify() == 'g') {
                     /*let killah = self.get_client_by_banner(self.objects[x].get_banner()).await;
                     if killah.is_some() {
                         let amount = self.objects[y].capture().await as i32;
@@ -1905,6 +1909,9 @@ async fn main(){
                                 b'G' => {
                                     server.place_green_thumb(x, y, banner);
                                 },
+                                b'g' => {
+                                    server.place_gold_bar(x, y, banner);
+                                }
                                 _ => {
                                     println!("The client attempted to place an object with invalid type {}", tp);
                                 }

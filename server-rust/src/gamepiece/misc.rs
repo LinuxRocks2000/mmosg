@@ -34,6 +34,7 @@ pub struct Radiation {
 }
 pub struct Nuke {}
 pub struct Block {}
+pub struct GoldBar {}
 pub struct Seed {
     countdown : u16,
     max_countdown : u16
@@ -144,6 +145,35 @@ impl GreenThumb {
     }
 }
 
+impl GoldBar {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+
+impl GamePiece for GoldBar {
+    fn construct(&self, thing : &mut ExposedProperties) {
+        thing.health_properties.max_health = 0.01;
+        thing.collision_info.damage = 0.0;
+    }
+
+    fn identify(&self) -> char {
+        'g'
+    }
+
+    fn cost(&self) -> i32 {
+        100
+    }
+
+    fn capture(&self) -> u32 {
+        100
+    }
+
+    fn obtain_physics(&self) -> PhysicsObject {
+        PhysicsObject::new(0.0, 0.0, 50.0, 30.0, 0.0)
+    }
+}
 
 impl GamePiece for GreenThumb {
     fn construct(&self, thing : &mut ExposedProperties) {
