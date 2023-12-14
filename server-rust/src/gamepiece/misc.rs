@@ -20,8 +20,7 @@ pub struct Chest {}
 pub struct Turret {}
 pub struct MissileLaunchingSystem {}
 pub struct GreenThumb {
-    countdown : u16,
-    seeds : Vec<u32>
+    countdown : u16
 }
 pub struct Carrier {
     angle_v : f32
@@ -140,8 +139,7 @@ impl Block {
 impl GreenThumb {
     pub fn new() -> Self {
         Self {
-            countdown : 10,
-            seeds : vec![]
+            countdown : 10
         }
     }
 }
@@ -152,12 +150,30 @@ impl GamePiece for GreenThumb {
         
     }
 
+    fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
+        self.countdown -= 1;
+        if self.countdown == 0 {
+            self.countdown = (800 + 800) / 30; // there are 20 chests around it, 1200 is the average chest lifetime.
+            let vec = properties.physics.vector_position() + Vector2::new_from_manda(200.0, properties.physics.angle());
+            server.place_seed(vec.x, vec.y, Some(properties.banner));
+            properties.physics.set_angle(properties.physics.angle() + 2.0 * PI / 30.0);
+        }
+    }
+
+    fn cost(&self) -> i32 {
+        1000
+    }
+
+    fn capture(&self) -> u32 {
+        500
+    }
+
     fn identify(&self) -> char {
         'G'
     }
 
     fn obtain_physics(&self) -> PhysicsObject {
-        PhysicsObject::new(0.0, 0.0, 20.0, 10.0, 0.0);
+        PhysicsObject::new(0.0, 0.0, 20.0, 10.0, 0.0)
     }
 }
 

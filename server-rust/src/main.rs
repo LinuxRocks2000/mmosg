@@ -304,6 +304,10 @@ impl Server {
         self.place(Box::new(Seed::new()), x, y, 0.0, sender);
     }
 
+    fn place_green_thumb(&mut self, x : f32, y : f32, sender : Option<usize>) {
+        self.place(Box::new(GreenThumb::new()), x, y, 0.0, sender);
+    }
+
     fn place_nexus(&mut self, x : f32, y : f32, effect_radius : f32) -> u32 {
         self.place(Box::new(Nexus::new(effect_radius)), x, y, 0.0, None)
     }
@@ -1482,7 +1486,6 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
                             else {
                                 println!("REJECTING OBJECT WE CAN'T AFFORD!");
                                 moi.commandah.send(ServerCommand::RejectObject (id)).await.expect("Failed!");
-                                break 'cliloop; // something nefarious happened; let's disconnect
                             }
                         }
                     }
@@ -1868,6 +1871,9 @@ async fn main(){
                                 },
                                 b'S' => {
                                     server.place_seed(x, y, banner);
+                                },
+                                b'G' => {
+                                    server.place_green_thumb(x, y, banner);
                                 },
                                 _ => {
                                     println!("The client attempted to place an object with invalid type {}", tp);
