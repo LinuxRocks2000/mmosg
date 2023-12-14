@@ -55,7 +55,8 @@ pub struct Client {
     a2a               : u16,
     walls_remaining   : u16,
     walls_cap         : u16,
-    game_cmode        : GameMode
+    game_cmode        : GameMode,
+    is_ready          : bool
 }
 
 
@@ -101,7 +102,8 @@ pub enum ClientToServer {
     Chat (String, bool), // the bool is if it's sent to everyone or not
     UpgradeThing (u32, String),
     SelfTest (bool, u8, u16, u32, i32, f32, String),
-    Shop (u8)
+    Shop (u8),
+    ReadyState (bool)
 }
 
 
@@ -166,7 +168,8 @@ pub struct Server {
     sql               : String,
     worldzone_count   : usize,
     zones             : Vec<Vec<usize>>,
-    vvlm              : bool
+    vvlm              : bool,
+    readies           : u32
 }
 
 #[derive(Debug)]
@@ -1029,7 +1032,8 @@ impl Client {
             kys: false,
             a2a: 0,
             walls_cap : 2,
-            walls_remaining : 4 // you get a bonus on turn 1
+            walls_remaining : 4, // you get a bonus on turn 1
+            is_ready : false
         }
     }
 
@@ -1068,6 +1072,12 @@ impl Client {
     async fn handle(&mut self, message : ClientToServer) {
         if self.is_authorized {
             match message {
+                ClientToServer::ReadyState (v) => {
+                    if v != self.is_ready {
+                        self.is_ready = v;
+                        self.commandah.send(ServerCommand::ReadyState (self.is_ready)).await.unwrap();
+                    }
+                }
                 ClientToServer::Place (x, y, tp) => {
                     if self.game_cmode == GameMode::Play && tp != b'c' { // if it is trying to place an object, but it isn't strat mode or waiting mode and it isn't placing a castle
                         // originally, this retaliated, but now it just refuses. the retaliation was a problem.
@@ -1384,6 +1394,7 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
                         moi.game_cmode = mode;
                         if mode == GameMode::Play { // if it's play mode
                             moi.walls_remaining = moi.walls_cap; // it can't use 'em until next turn, ofc
+                            moi.is_ready = false;
                         }
                         //let mut schlock = server.lock().await;
                         //schlock.winning_banner = moi.banner;
@@ -1520,6 +1531,9 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
     if serverlock.is_io || serverlock.mode == GameMode::Waiting {
         serverlock.clear_of_banner(moi.banner);
     }*/
+    if moi.is_ready {
+        moi.commandah.send(ServerCommand::ReadyState (false)).await.unwrap();
+    }
     moi.commandah.send(ServerCommand::Disconnect (moi.mode, moi.banner, moi.m_castle)).await.unwrap();
     println!("Dropped client");
 }
@@ -1593,7 +1607,8 @@ enum ServerCommand {
     Chat (usize, String, u8, Option<usize>),
     UpgradeNextTier (u32, String),
     BeginConnection (String, String, String, tokio::sync::mpsc::Sender<InitialSetupCommand>), // password, banner, mode, outgoing pipe. god i've got to clean this up. vomiting face.
-    WinningBanner (usize, bool) // report a banner that is alive and whether or not the player is an rtf. the server will do some routines.
+    WinningBanner (usize, bool), // report a banner that is alive and whether or not the player is an rtf. the server will do some routines.
+    ReadyState (bool)
 }
 
 
@@ -1630,7 +1645,8 @@ async fn main(){
         sql                 : "default.db".to_string(),
         worldzone_count     : 1,
         zones               : Vec::new(),
-        vvlm                : false
+        vvlm                : false,
+        readies             : 0
     };
     //rx.close().await;
     server.load_config();
@@ -1660,6 +1676,20 @@ async fn main(){
                         Some (ServerCommand::Start) => {
                             server.start();
                         },
+                        Some (ServerCommand::ReadyState (v)) => {
+                            if v {
+                                server.readies += 1;
+                            }
+                            else {
+                                server.readies -= 1;
+                            }
+                            if server.readies >= server.living_players {
+                                if server.mode != GameMode::Play {
+                                    server.readies = 0;
+                                    server.set_mode(GameMode::Play);
+                                }
+                            }
+                        }
                         Some (ServerCommand::Christmas) => {
                             server.broadcast_tx.send(ClientCommand::Christmas).unwrap();
                         }
