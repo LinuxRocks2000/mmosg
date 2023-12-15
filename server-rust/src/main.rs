@@ -94,7 +94,7 @@ pub enum ServerToClient {
 pub enum ClientToServer {
     Ping,
     Connect (String, String, String), // password, banner, mode
-    Place (f32, f32, u8, u8), // x, y, type, variant
+    Place (f32, f32, u8, u32), // x, y, type, variant
     Cost (i32),
     Move (u32, f32, f32, f32),
     LaunchA2A (u32),
@@ -1601,7 +1601,7 @@ pub enum PlaceCommand {
     Fort (f32, f32, Option<usize>, u32), // x, y, banner, item to attach the fort to
     Castle (f32, f32, ClientMode, usize, Option<usize>), // x, y, mode, banner, team
     A2A (u32, u32, usize), // gunner, target, banner
-    CarrierVariant (f32, f32, Option<usize>, u8) // x, y, banner, variant
+    CarrierVariant (f32, f32, Option<usize>, u32) // x, y, banner, variant
 }
 
 
@@ -1961,7 +1961,7 @@ async fn main(){
                         Some (ServerCommand::Place (PlaceCommand::CarrierVariant (x, y, banner, variant))) => {
                             let carrier = server.place_carrier(x, y, 0.0, banner);
                             let carrier = server.obj_lookup(carrier).unwrap();
-                            match variant {
+                            /*match variant {
                                 1 => {
                                     let turret = server.place_turret(x, y, 0.0, banner);
                                     server.into_berth(carrier, turret, 0);
@@ -2040,6 +2040,40 @@ async fn main(){
                                 },
                                 _ => {
                                     println!("Unrecognized carrier variant {}", variant);
+                                }
+                            }*/
+                            // bitbanged
+                            for i in 0..10_usize { // 10 berths
+                                let bit = 8_u32.pow(i as u32);
+                                let word = (variant / bit) % 8; // it's' complex math. don't worry your sweet wittle head about it.
+                                let item = match word {
+                                    1 => {
+                                        server.place_missile(x, y, 0.0, banner)
+                                    },
+                                    2 => {
+                                        server.place_basic_fighter(x, y, 0.0, banner)
+                                    },
+                                    3 => {
+                                        server.place_tie_fighter(x, y, 0.0, banner)
+                                    },
+                                    4 => {
+                                        server.place_sniper(x, y, 0.0, banner)
+                                    },
+                                    5 => {
+                                        server.place_nuke(x, y, 0.0, banner)
+                                    },
+                                    6 => {
+                                        server.place_turret(x, y, 0.0, banner)
+                                    },
+                                    7 => {
+                                        server.place_mls(x, y, 0.0, banner)
+                                    },
+                                    _ => {
+                                        0
+                                    }
+                                };
+                                if item != 0 {
+                                    server.into_berth(carrier, item, i);
                                 }
                             }
                         }
