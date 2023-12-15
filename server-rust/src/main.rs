@@ -312,8 +312,8 @@ impl Server {
         self.place(Box::new(GreenThumb::new()), x, y, 0.0, sender);
     }
 
-    fn place_gold_bar(&mut self, x : f32, y : f32, sender : Option<usize>) {
-        self.place(Box::new(GoldBar::new()), x, y, 0.0, sender);
+    fn place_gold_bar(&mut self, x : f32, y : f32, sender : Option<usize>) -> u32 {
+        self.place(Box::new(GoldBar::new()), x, y, 0.0, sender)
     }
 
     fn place_nexus(&mut self, x : f32, y : f32, effect_radius : f32) -> u32 {
@@ -2044,8 +2044,8 @@ async fn main(){
                             }*/
                             // bitbanged
                             for i in 0..10_usize { // 10 berths
-                                let bit = 8_u32.pow(i as u32);
-                                let word = (variant / bit) % 8; // it's' complex math. don't worry your sweet wittle head about it.
+                                let bit = 9_u32.pow(i as u32);
+                                let word = (variant / bit) % 9; // it's complex math. don't worry your sweet wittle head about it.
                                 let item = match word {
                                     1 => {
                                         server.place_missile(x, y, 0.0, banner)
@@ -2068,6 +2068,9 @@ async fn main(){
                                     7 => {
                                         server.place_mls(x, y, 0.0, banner)
                                     },
+                                    8 => {
+                                        server.place_gold_bar(x, y, banner)
+                                    }
                                     _ => {
                                         0
                                     }
