@@ -311,6 +311,37 @@ impl GamePieceBase {
         self.piece.does_grant_a2a()
     }
 
+    pub fn update_carried(&mut self, server : &mut Server) {
+        for i in 0..self.exposed_properties.carrier_properties.carrying.len() {
+            let obj = server.obj_lookup(self.exposed_properties.carrier_properties.carrying[i]);
+            match obj {
+                Some(obj) => {
+                    if self.piece.carry_iter(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties) { // drop the carried object
+                        self.piece.drop_carry(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties);
+                        server.send_to(ServerToClient::UnCarry (server.objects[obj].get_id()), server.objects[obj].get_banner());
+                        self.exposed_properties.carrier_properties.space_remaining += 1;
+                        server.objects[obj].exposed_properties.carrier_properties.is_carried = false;
+                    }
+                }
+                None => {}
+            }
+        }
+        let mut i : usize = 0;
+        while i < self.exposed_properties.carrier_properties.carrying.len() { // remove everything from the list AFTER they've been properly released, so reordering doesn't cause problems above
+            let obj = server.obj_lookup(self.exposed_properties.carrier_properties.carrying[i]);
+            match obj {
+                Some(obj) => {    // TODO: optimize, we should only need one lookup per object for this instead of 2.
+                    if !server.objects[obj].exposed_properties.carrier_properties.is_carried { // if it's been marked not-carried, so we still have an uncarried object in our carry list - problematic!
+                        self.exposed_properties.carrier_properties.carrying.remove(i);
+                        continue; // don't let it increment i
+                    }
+                }
+                None => {}
+            }
+            i += 1;
+        }
+    }
+
     pub fn target(&mut self, server : &mut Server) {
         let mut best : Option<usize> = None;
         let mut best_value : f32 = 0.0; // If best is None, this value is ignored, so it can be anything.
@@ -447,34 +478,7 @@ impl GamePieceBase {
         }
         self.exposed_properties.physics.update();
         self.piece.update(&mut self.exposed_properties, server);
-        for i in 0..self.exposed_properties.carrier_properties.carrying.len() {
-            let obj = server.obj_lookup(self.exposed_properties.carrier_properties.carrying[i]);
-            match obj {
-                Some(obj) => {
-                    if self.piece.carry_iter(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties) { // drop the carried object
-                        self.piece.drop_carry(&mut self.exposed_properties, &mut server.objects[obj].exposed_properties);
-                        server.send_to(ServerToClient::UnCarry (server.objects[obj].get_id()), server.objects[obj].get_banner());
-                        self.exposed_properties.carrier_properties.space_remaining += 1;
-                        server.objects[obj].exposed_properties.carrier_properties.is_carried = false;
-                    }
-                }
-                None => {}
-            }
-        }
-        let mut i : usize = 0;
-        while i < self.exposed_properties.carrier_properties.carrying.len() { // remove everything from the list AFTER they've been properly released, so reordering doesn't cause problems above
-            let obj = server.obj_lookup(self.exposed_properties.carrier_properties.carrying[i]);
-            match obj {
-                Some(obj) => {    // TODO: optimize, we should only need one lookup per object for this instead of 2.
-                    if !server.objects[obj].exposed_properties.carrier_properties.is_carried { // if it's been marked not-carried, so we still have an uncarried object in our carry list - problematic!
-                        self.exposed_properties.carrier_properties.carrying.remove(i);
-                        continue; // don't let it increment i
-                    }
-                }
-                None => {}
-            }
-            i += 1;
-        }
+        self.update_carried(server);
         if self.exposed_properties.physics.portals {
             self.exposed_properties.physics.set_cx(coterminal(self.exposed_properties.physics.cx(), server.gamesize as f32));
             self.exposed_properties.physics.set_cy(coterminal(self.exposed_properties.physics.cy(), server.gamesize as f32));

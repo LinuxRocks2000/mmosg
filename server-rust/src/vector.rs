@@ -24,7 +24,7 @@ impl Vector2 {
     }
 
     pub fn new_from_manda(mag : f32, ang : f32) -> Self {
-        Vector2::new (mag * ang.cos(), mag * ang.sin())
+        Vector2::new(mag * ang.cos(), mag * ang.sin())
     }
 
     pub fn angle(&self) -> f32 {

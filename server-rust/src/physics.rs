@@ -1,5 +1,4 @@
 use crate::vector::Vector2;
-use std::f32::consts::PI;
 
 #[derive(Copy, Clone, Debug)]
 pub struct BoxShape {
@@ -32,11 +31,10 @@ impl BoxShape {
         }
     }
 
-    pub fn get_perp_axes(&self) -> Vec<Vector2> {
-        vec![
-            Vector2::new_from_manda(1.0, self.a), // No need to perpendicularize these two - they *are* their own perpendiculars.
-            Vector2::new_from_manda(1.0, self.a + PI/2.0) // For the other two sides, the angle comes out the same, and the angle is the only important component. Thus: optimize by leaving 'em out.
-        ]
+    pub fn get_perp_axes(&self) -> [Vector2; 2] {
+        let v = Vector2::new_from_manda(1.0, self.a);
+        let v2 = v.perpendicular();
+        [v, v2]
     }
 
     pub fn points(&self) -> Vec<Vector2> {
@@ -79,9 +77,9 @@ impl BoxShape {
         let tbx = other.worst();
         let mut mtv = Vector2::empty();
         if (mbx.x - mbx.w/2.0 < tbx.x + tbx.w/2.0) && (mbx.y - mbx.h/2.0 < tbx.y + tbx.h/2.0) && (mbx.x + mbx.w/2.0 > tbx.x - tbx.w/2.0) && (mbx.y + mbx.h/2.0 > tbx.y - tbx.h/2.0) { // Short circuit: if there's no fast, crappy collision between the two, as is the case 90% of the time, don't bother doing a slow, accurate collision
-            let mut axes : Vec<Vector2> = self.get_perp_axes();
-            let mut other_axes : Vec<Vector2> = other.get_perp_axes();
-            axes.append(&mut other_axes);
+            let me_axes = self.get_perp_axes();
+            let other_axes = other.get_perp_axes();
+            let axes : [Vector2; 4] = [me_axes[0], me_axes[1], other_axes[0], other_axes[1]];
             for (_, axis) in axes.iter().enumerate() {
                 let me_range = self.get_dotrange(*axis);
                 let them_range = other.get_dotrange(*axis);

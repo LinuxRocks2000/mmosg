@@ -94,7 +94,7 @@ pub enum ServerToClient {
 pub enum ClientToServer {
     Ping,
     Connect (String, String, String), // password, banner, mode
-    Place (f32, f32, u8),
+    Place (f32, f32, u8, u8), // x, y, type, variant
     Cost (i32),
     Move (u32, f32, f32, f32),
     LaunchA2A (u32),
@@ -141,6 +141,7 @@ enum ClientCommand { // Commands sent to clients
 
 
 pub struct Server {
+    self_test         : bool,
     mode              : GameMode,
     password          : String,
     objects           : Vec<GamePieceBase>,
@@ -451,6 +452,18 @@ impl Server {
         }
     }
 
+    pub fn into_berth(&mut self, carrier : usize, id : u32, berth : usize) {
+        let thing = self.obj_lookup(id).unwrap();
+        self.carry_tasks(carrier, thing);
+        self.objects[thing].exposed_properties.carrier_properties.berth = berth;
+        unsafe { // gotta hate borrow checking
+            //let mut objects = *(&mut self.objects as *mut Vec<GamePieceBase>);
+            (*(&mut self.objects as *mut Vec<GamePieceBase>))[carrier].update_carried(self);
+        }
+        let phys = self.objects[thing].exposed_properties.physics.shape;
+        self.broadcast(ServerToClient::MoveObjectFull (id, phys.x, phys.y, phys.a, phys.w, phys.h));
+    }
+
     pub fn shoot(&mut self, bullet_type : BulletType, position : Vector2, velocity : Vector2, range : i32, sender : Option<usize>) -> u32 {
         let bullet = self.place(match bullet_type {
             BulletType::Bullet => Box::new(Bullet::new()),
@@ -508,6 +521,9 @@ impl Server {
         }
         if self.objects[x].exposed_properties.carrier_properties.is_carried || self.objects[y].exposed_properties.carrier_properties.is_carried {
             return; // Never do any kind of collisions on carried objects.
+        }
+        if !self.objects[x].get_does_collide(self.objects[y].identify()) && !self.objects[y].get_does_collide(self.objects[x].identify()) {
+            return; // they can't possibly interact with each other so there's no reason to do any physics checks at all
         }
         let intasectah = self.objects[x].exposed_properties.physics.shape().intersects(self.objects[y].exposed_properties.physics.shape());
         if intasectah.0 {
@@ -748,6 +764,10 @@ impl Server {
     }
 
     fn mainloop(&mut self) {
+        if self.self_test { // run update routines ONLY, ignoring clients.
+            self.deal_with_objects();
+            return;
+        }
         if self.authenticateds == 0 { // nothing happens if there isn't anyone for it to happen to
             return;
         }
@@ -1082,18 +1102,12 @@ impl Client {
                         self.commandah.send(ServerCommand::ReadyState (self.is_ready)).await.unwrap();
                     }
                 }
-                ClientToServer::Place (x, y, tp) => {
+                ClientToServer::Place (x, y, tp, variant) => {
                     if self.game_cmode == GameMode::Play && tp != b'c' { // if it is trying to place an object, but it isn't strat mode or waiting mode and it isn't placing a castle
                         // originally, this retaliated, but now it just refuses. the retaliation was a problem.
                         println!("ATTEMPT TO PLACE IN PLAY MODE");
                         return; // can't place things if it ain't strategy. Also this is poison.
                     }
-                    /*
-                    if x < 0.0 || x > server.gamesize || y < 0.0 || y > server.gamesize { 
-                        self.kys = true;
-                        return;
-                    }*/
-                    // KNOWN UNFIXED VULNERABILITY: this code was dumb, we need to figure out a better way to handle it. it's not a *serious* problem that richard can place outside of the map.
                     match tp {
                         b'c' => {
                             if !self.has_placed {
@@ -1109,6 +1123,16 @@ impl Client {
                             if self.walls_remaining > 0 {
                                 self.commandah.send(ServerCommand::Place (PlaceCommand::SimplePlace (x, y, Some(self.banner), b'w'))).await.unwrap();
                                 self.walls_remaining -= 1;
+                            }
+                        },
+                        b'K' => {
+                            match variant {
+                                0 => {
+                                    self.commandah.send(ServerCommand::Place (PlaceCommand::SimplePlace (x, y, Some(self.banner), b'K'))).await.unwrap();
+                                },
+                                _ => {
+                                    self.commandah.send(ServerCommand::Place (PlaceCommand::CarrierVariant (x, y, Some(self.banner), variant))).await.unwrap();
+                                }
                             }
                         },
                         b'F' => {
@@ -1576,7 +1600,8 @@ pub enum PlaceCommand {
     SimplePlace (f32, f32, Option<usize>, u8), // x, y, banner, type
     Fort (f32, f32, Option<usize>, u32), // x, y, banner, item to attach the fort to
     Castle (f32, f32, ClientMode, usize, Option<usize>), // x, y, mode, banner, team
-    A2A (u32, u32, usize) // gunner, target, banner
+    A2A (u32, u32, usize), // gunner, target, banner
+    CarrierVariant (f32, f32, Option<usize>, u8) // x, y, banner, variant
 }
 
 
@@ -1591,6 +1616,7 @@ enum InitialSetupCommand {
 
 #[derive(Debug)]
 enum ServerCommand {
+    SelfTest,
     Start,
     Flip,
     Christmas,
@@ -1622,6 +1648,7 @@ async fn main(){
     let mut rng = rand::thread_rng();
     let (broadcast_tx, _rx) = tokio::sync::broadcast::channel(128); // Give _rx a name because we want it to live to the end of this function; if it doesn't, the tx will be invalidated. or something.
     let mut server = Server {
+        self_test           : false,
         mode                : GameMode::Waiting,
         password            : "".to_string(),
         config              : Some(Arc::new(Config::new(&args[1]))),
@@ -1671,7 +1698,21 @@ async fn main(){
                     let start = Instant::now();
                     server.mainloop();
                     if start.elapsed() > tokio::time::Duration::from_millis((1000.0/FPS) as u64) {
-                        println!("LOOP OVERRUN!");
+                        if server.self_test {
+                            println!("Failure at {} objects", server.objects.len());
+                            let obj = server.objects.len() - 1;
+                            server.objects[obj].damage(100.0);
+                            server.objects[obj].damage(100.0);
+                        }
+                        else {
+                            println!("LOOP OVERRUN!");
+                        }
+                    }
+                    else if server.self_test {
+                        server.place_random_rubble();
+                        if server.objects.len() % 10 == 0 {
+                            println!("reached {} objects", server.objects.len());
+                        }
                     }
                 },
                 command = commandget.recv() => {
@@ -1917,6 +1958,91 @@ async fn main(){
                                 }
                             }
                         }
+                        Some (ServerCommand::Place (PlaceCommand::CarrierVariant (x, y, banner, variant))) => {
+                            let carrier = server.place_carrier(x, y, 0.0, banner);
+                            let carrier = server.obj_lookup(carrier).unwrap();
+                            match variant {
+                                1 => {
+                                    let turret = server.place_turret(x, y, 0.0, banner);
+                                    server.into_berth(carrier, turret, 0);
+                                    let turret = server.place_turret(x, y, 0.0, banner);
+                                    server.into_berth(carrier, turret, 1);
+                                    let turret = server.place_turret(x, y, 0.0, banner);
+                                    server.into_berth(carrier, turret, 8);
+                                    let turret = server.place_turret(x, y, 0.0, banner);
+                                    server.into_berth(carrier, turret, 9);
+
+                                    let hyper = server.place_missile(x, y, 0.0, banner);
+                                    server.into_berth(carrier, hyper, 2);
+                                    let hyper = server.place_missile(x, y, 0.0, banner);
+                                    server.into_berth(carrier, hyper, 3);
+                                    let hyper = server.place_missile(x, y, 0.0, banner);
+                                    server.into_berth(carrier, hyper, 6);
+                                    let hyper = server.place_missile(x, y, 0.0, banner);
+                                    server.into_berth(carrier, hyper, 7);
+
+                                    let nuke = server.place_nuke(x, y, 0.0, banner);
+                                    server.into_berth(carrier, nuke, 4);
+                                    let nuke = server.place_nuke(x, y, 0.0, banner);
+                                    server.into_berth(carrier, nuke, 5);
+                                },
+                                2 => {
+                                    let turret = server.place_turret(x, y, 0.0, banner);
+                                    server.into_berth(carrier, turret, 0);
+                                    let turret = server.place_turret(x, y, 0.0, banner);
+                                    server.into_berth(carrier, turret, 1);
+
+                                    let hyper = server.place_missile(x, y, 0.0, banner);
+                                    server.into_berth(carrier, hyper, 4);
+                                    let hyper = server.place_missile(x, y, 0.0, banner);
+                                    server.into_berth(carrier, hyper, 5);
+                                    let hyper = server.place_missile(x, y, 0.0, banner);
+                                    server.into_berth(carrier, hyper, 6);
+                                    let hyper = server.place_missile(x, y, 0.0, banner);
+                                    server.into_berth(carrier, hyper, 7);
+                                    let hyper = server.place_missile(x, y, 0.0, banner);
+                                    server.into_berth(carrier, hyper, 8);
+                                    let hyper = server.place_missile(x, y, 0.0, banner);
+                                    server.into_berth(carrier, hyper, 9);
+
+                                    let nuke = server.place_nuke(x, y, 0.0, banner);
+                                    server.into_berth(carrier, nuke, 2);
+                                    let nuke = server.place_nuke(x, y, 0.0, banner);
+                                    server.into_berth(carrier, nuke, 3);
+                                },
+                                3 => {
+                                    for i in 0..10 {
+                                        let thing = if i % 2 == 0 { server.place_missile(x, y, 0.0, banner) } else { server.place_turret(x, y, 0.0, banner) };
+                                        server.into_berth(carrier, thing, i);
+                                    }
+                                },
+                                4 => {
+                                    for i in 0..10 {
+                                        let thing = server.place_missile(x, y, 0.0, banner);
+                                        server.into_berth(carrier, thing, i);
+                                    }
+                                },
+                                5 => {
+                                    for i in 0..4 {
+                                        let tie = server.place_tie_fighter(x, y, 0.0, banner);
+                                        server.into_berth(carrier, tie, i);
+                                    }
+                                    for i in 4..10 {
+                                        let hyper = server.place_missile(x, y, 0.0, banner);
+                                        server.into_berth(carrier, hyper, i);
+                                    }
+                                },
+                                6 => {
+                                    for i in 0..10 {
+                                        let thing = server.place_tie_fighter(x, y, 0.0, banner);
+                                        server.into_berth(carrier, thing, i);
+                                    }
+                                },
+                                _ => {
+                                    println!("Unrecognized carrier variant {}", variant);
+                                }
+                            }
+                        }
                         Some (ServerCommand::Place (PlaceCommand::Fort (x, y, banner, target))) => {
                             match server.obj_lookup(target) {
                                 Some(index) => {
@@ -1925,6 +2051,9 @@ async fn main(){
                                 }
                                 None => {}
                             }
+                        }
+                        Some (ServerCommand::SelfTest) => {
+                            server.self_test = true;
                         }
                         Some (ServerCommand::Place (PlaceCommand::Castle (x, y, mode, banner, team))) => {
                             if server.mode != GameMode::Waiting && !server.is_io {
@@ -2075,6 +2204,9 @@ async fn cli(commandset : tokio::sync::mpsc::Sender<ServerCommand>) {
             }
             "reset" => {
                 ServerCommand::Reset
+            }
+            "selftest" => {
+                ServerCommand::SelfTest
             }
             _ => {
                 println!("Invalid command.");
