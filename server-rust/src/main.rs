@@ -41,6 +41,7 @@ pub enum ClientMode {
 
 
 pub struct Client {
+    is_superuser      : bool,
     socket            : WebSocketClientStream,
     is_authorized     : bool,
     score             : i32,
@@ -87,7 +88,8 @@ pub enum ServerToClient {
     Tie,
     SeedCompletion (u32, u16), // seed id, completion value
     Carry (u32, u32), // carrier, carried
-    UnCarry (u32) // no longer carrying this guy
+    UnCarry (u32), // no longer carrying this guy
+    YouAreGod // you are God
 }
 
 #[derive(ProtocolFrame, Debug, Clone)]
@@ -103,7 +105,12 @@ pub enum ClientToServer {
     UpgradeThing (u32, String),
     SelfTest (bool, u8, u16, u32, i32, f32, String),
     Shop (u8),
-    ReadyState (bool)
+    ReadyState (bool),
+    GodDelete (u32),
+    GodReset,
+    GodDisconnect (u32),
+    GodNuke (u32),
+    GodFlip
 }
 
 
@@ -136,11 +143,13 @@ enum ClientCommand { // Commands sent to clients
     HealthStream (u32, f32), // id to stream, health value
     RoleCall, // the client will immediately report its banner in the WinningBanner message.
     SomeoneDied (usize), // banner
-    Christmas
+    Christmas,
+    Close (usize)
 }
 
 
 pub struct Server {
+    admin_password    : String,
     self_test         : bool,
     mode              : GameMode,
     password          : String,
@@ -178,7 +187,8 @@ enum AuthState {
     Error,
     Single,
     Team (usize, bool),
-    Spectator
+    Spectator,
+    God
 }
 
 impl Server {
@@ -904,6 +914,10 @@ impl Server {
     }
 
     fn authenticate(&self, password : String, spectator : bool) -> AuthState {
+        if self.admin_password == password {
+            return AuthState::God;
+        }
+        // God can't be on a team. Is this a profound philosophical metaphor???
         if spectator {
             return AuthState::Spectator
         }
@@ -1043,6 +1057,7 @@ impl Client {
     fn new(socket : WebSocketClientStream, commandah : tokio::sync::mpsc::Sender<ServerCommand>) -> Self {
         Self {
             socket,
+            is_superuser : false,
             game_cmode: GameMode::Waiting,
             is_authorized: false,
             score: 0,
@@ -1103,11 +1118,12 @@ impl Client {
                     }
                 }
                 ClientToServer::Place (x, y, tp, variant) => {
-                    if self.game_cmode == GameMode::Play && tp != b'c' { // if it is trying to place an object, but it isn't strat mode or waiting mode and it isn't placing a castle
+                    if self.game_cmode == GameMode::Play && tp != b'c' && !self.is_superuser { // if it is trying to place an object, but it isn't strat mode or waiting mode and it isn't placing a castle
                         // originally, this retaliated, but now it just refuses. the retaliation was a problem.
                         println!("ATTEMPT TO PLACE IN PLAY MODE");
                         return; // can't place things if it ain't strategy. Also this is poison.
                     }
+                    let fire_banner = if self.is_superuser { None } else { Some(self.banner) };
                     match tp {
                         b'c' => {
                             if !self.has_placed {
@@ -1121,30 +1137,32 @@ impl Client {
                         },
                         b'w' => {
                             if self.walls_remaining > 0 {
-                                self.commandah.send(ServerCommand::Place (PlaceCommand::SimplePlace (x, y, Some(self.banner), b'w'))).await.unwrap();
-                                self.walls_remaining -= 1;
+                                self.commandah.send(ServerCommand::Place (PlaceCommand::SimplePlace (x, y, fire_banner, b'w'))).await.unwrap();
+                                if !self.is_superuser {
+                                    self.walls_remaining -= 1;
+                                }
                             }
                         },
                         b'K' => {
                             match variant {
                                 0 => {
-                                    self.commandah.send(ServerCommand::Place (PlaceCommand::SimplePlace (x, y, Some(self.banner), b'K'))).await.unwrap();
+                                    self.commandah.send(ServerCommand::Place (PlaceCommand::SimplePlace (x, y, fire_banner, b'K'))).await.unwrap();
                                 },
                                 _ => {
-                                    self.commandah.send(ServerCommand::Place (PlaceCommand::CarrierVariant (x, y, Some(self.banner), variant))).await.unwrap();
+                                    self.commandah.send(ServerCommand::Place (PlaceCommand::CarrierVariant (x, y, fire_banner, variant))).await.unwrap();
                                 }
                             }
                         },
                         b'F' => {
                             match self.m_castle {
                                 Some(cid) => {
-                                    self.commandah.send(ServerCommand::Place (PlaceCommand::Fort (x, y, Some(self.banner), cid))).await.unwrap();
+                                    self.commandah.send(ServerCommand::Place (PlaceCommand::Fort (x, y, fire_banner, cid))).await.unwrap();
                                 }
                                 None => {}
                             }
                         },
                         _ => {
-                            self.commandah.send(ServerCommand::Place (PlaceCommand::SimplePlace (x, y, Some(self.banner), tp))).await.unwrap();
+                            self.commandah.send(ServerCommand::Place (PlaceCommand::SimplePlace (x, y, fire_banner, tp))).await.unwrap();
                         }
                     }
                 },
@@ -1154,7 +1172,7 @@ impl Client {
                     self.collect(-amount).await;
                 },
                 ClientToServer::Move (id, x, y, a) => {
-                    self.commandah.send(ServerCommand::Move (self.banner, id, x, y, a)).await.unwrap();
+                    self.commandah.send(ServerCommand::Move (self.banner, id, x, y, a, self.is_superuser)).await.unwrap();
                 },
                 ClientToServer::LaunchA2A (target) => { // AIR TO AIR!
                     if self.a2a == 0 {
@@ -1265,6 +1283,31 @@ impl Client {
                         }
                     }
                 }
+                ClientToServer::GodDelete (id) => {
+                    if self.is_superuser {
+                        self.commandah.send(ServerCommand::RejectObject (id)).await.unwrap();
+                    }
+                },
+                ClientToServer::GodReset => {
+                    if self.is_superuser {
+                        self.commandah.send(ServerCommand::Reset).await.unwrap();
+                    }
+                }
+                ClientToServer::GodDisconnect (cli) => {
+                    if self.is_superuser {
+                        self.commandah.send(ServerCommand::GodDisconnect (cli as usize)).await.unwrap();
+                    }
+                }
+                ClientToServer::GodFlip => {
+                    if self.is_superuser {
+                        self.commandah.send(ServerCommand::Flip).await.unwrap();
+                    }
+                }
+                ClientToServer::GodNuke (n) => {
+                    if self.is_superuser {
+                        self.commandah.send(ServerCommand::Nuke (n as usize)).await.unwrap();
+                    }
+                }
             }
         }
         else {
@@ -1293,6 +1336,12 @@ impl Client {
                                             AuthState::Single => {
                                                 self.send_protocol_message(ServerToClient::Welcome).await;
                                                 self.is_authorized = true;
+                                            },
+                                            AuthState::God => {
+                                                self.send_protocol_message(ServerToClient::Welcome).await;
+                                                self.send_protocol_message(ServerToClient::YouAreGod).await;
+                                                self.is_authorized = true;
+                                                self.is_superuser = true;
                                             },
                                             _ => {println!("yooo");}
                                         }
@@ -1418,6 +1467,11 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
             },
             command = receiver.recv().fuse() => {
                 match command {
+                    Ok (ClientCommand::Close (whom)) => {
+                        if moi.banner == whom {
+                            break 'cliloop;
+                        }
+                    },
                     Ok (ClientCommand::Tick (counter, mode)) => {
                         moi.game_cmode = mode;
                         if mode == GameMode::Play { // if it's play mode
@@ -1518,7 +1572,7 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
                                     }
                                 }
                             }*/
-                            if moi.score >= price {
+                            if moi.score >= price || moi.is_superuser {
                                 moi.collect(-price).await;
                                 moi.send_protocol_message(ServerToClient::Add (id)).await;
                             }
@@ -1632,24 +1686,36 @@ enum ServerCommand {
     Nuke (usize),
     Reset,
     Place (PlaceCommand),
-    Move (usize, u32, f32, f32, f32), // banner, id, x, y, a
+    Move (usize, u32, f32, f32, f32, bool), // banner, id, x, y, a, is_superuser
     PilotRTF (u32, bool, bool, bool, bool, bool),
     Chat (usize, String, u8, Option<usize>),
     UpgradeNextTier (u32, String),
     BeginConnection (String, String, String, tokio::sync::mpsc::Sender<InitialSetupCommand>), // password, banner, mode, outgoing pipe. god i've got to clean this up. vomiting face.
     WinningBanner (usize, bool), // report a banner that is alive and whether or not the player is an rtf. the server will do some routines.
-    ReadyState (bool)
+    ReadyState (bool),
+    GodDisconnect (usize) // disconnect a player
 }
+
+const WORDLIST : [&str; 10] = ["Robust", "Nancy", "Sovereign", "Green", "Tailor", "Water", "Freebase", "Neon", "Morlock", "Rastafari"];
 
 
 #[tokio::main]
 async fn main(){
     let args: Vec<String> = std::env::args().collect();
     let mut rng = rand::thread_rng();
+    use rand::prelude::SliceRandom;
     let (broadcast_tx, _rx) = tokio::sync::broadcast::channel(128); // Give _rx a name because we want it to live to the end of this function; if it doesn't, the tx will be invalidated. or something.
+    let mut admin_password = String::new();
+    for x in 0..4 {
+        admin_password += WORDLIST.choose(&mut rng).unwrap();
+        if x < 3 {
+            admin_password += " ";
+        }
+    }
     let mut server = Server {
         self_test           : false,
         mode                : GameMode::Waiting,
+        admin_password,
         password            : "".to_string(),
         config              : Some(Arc::new(Config::new(&args[1]))),
         objects             : vec![],
@@ -1683,7 +1749,7 @@ async fn main(){
     server.load_config();
     let port = server.port;
     let headless = server.is_headless;
-    println!("Started server with password {}, terrain seed {}", server.password, server.terrain_seed);
+    println!("Started server with password {}, terrain seed {}. The admin password is {}.", server.password, server.terrain_seed, server.admin_password);
     let (commandset, mut commandget) = tokio::sync::mpsc::channel(32); // fancy number
     let commandset_clone = commandset.clone();
     tokio::task::spawn(async move {
@@ -1718,6 +1784,9 @@ async fn main(){
                 command = commandget.recv() => {
                     //println!("honk");
                     match command {
+                        Some (ServerCommand::GodDisconnect (n)) => {
+                            server.broadcast_tx.send(ClientCommand::Close (n)).unwrap();
+                        }
                         Some (ServerCommand::Start) => {
                             server.start();
                         },
@@ -1750,9 +1819,9 @@ async fn main(){
                         Some (ServerCommand::Autonomous (min_players, max_players, auto_timeout)) => {
                             server.autonomous = Some((min_players, max_players, auto_timeout, auto_timeout));
                         },
-                        Some (ServerCommand::Move (banner, id, x, y, a)) => {
+                        Some (ServerCommand::Move (banner, id, x, y, a, superuser)) => {
                             for object in &mut server.objects {
-                                if object.get_id() == id && object.get_banner() == banner {
+                                if object.get_id() == id && (object.get_banner() == banner || superuser) {
                                     object.exposed_properties.goal_x = x;
                                     object.exposed_properties.goal_y = y;
                                     object.exposed_properties.goal_a = a;
@@ -1808,6 +1877,10 @@ async fn main(){
                                         println!("Authentication error");
 
                                     },
+                                    AuthState::God => {
+                                        println!("========== God joined ==========");
+                                        transmit.send(InitialSetupCommand::Joined (AuthState::God)).await.unwrap();
+                                    },
                                     AuthState::Single => {
                                         println!("Single player joined");
                                         transmit.send(InitialSetupCommand::Joined (AuthState::Single)).await.unwrap();
@@ -1853,9 +1926,11 @@ async fn main(){
                                 println!("yuh");
                             }
                             server.clear_of_banner(banner);
-                            server.clients_connected -= 1;
                             if server.clients_connected == 0 {
                                 server.reset();
+                            }
+                            else {
+                                server.clients_connected -= 1;
                             }
                         },
                         Some (ServerCommand::Connect) => {
