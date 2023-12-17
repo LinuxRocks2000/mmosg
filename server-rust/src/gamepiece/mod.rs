@@ -14,7 +14,7 @@ use crate::functions::coterminal;
 #[derive(Clone)]
 pub struct ShooterProperties {
     shoot         : bool,
-    counter       : u32,
+    pub counter   : u32,
     angles        : Vec<f32>,
     range         : i32,
     pub suppress  : bool, // It can't shoot if this is on, but it can count down.
@@ -24,9 +24,9 @@ pub struct ShooterProperties {
 
 #[derive(Clone)]
 pub struct HealthProperties {
-    max_health   : f32,
-    health       : f32,
-    passive_heal : f32,
+    pub max_health        : f32,
+    pub health            : f32,
+    passive_heal          : f32,
     prevent_friendly_fire : bool
 }
 

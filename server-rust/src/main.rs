@@ -110,7 +110,8 @@ pub enum ClientToServer {
     GodReset,
     GodDisconnect (u32),
     GodNuke (u32),
-    GodFlip
+    GodFlip,
+    GodBless (u32)
 }
 
 
@@ -1307,6 +1308,11 @@ impl Client {
                     if self.is_superuser {
                         self.commandah.send(ServerCommand::Nuke (n as usize)).await.unwrap();
                     }
+                },
+                ClientToServer::GodBless (banner) => {
+                    if self.is_superuser {
+                        self.commandah.send(ServerCommand::ChristmasExclusive (banner as usize)).await.unwrap();
+                    }
                 }
             }
         }
@@ -1674,6 +1680,7 @@ enum ServerCommand {
     Start,
     Flip,
     Christmas,
+    ChristmasExclusive (usize),
     IoModeToggle,
     PasswordlessToggle,
     Autonomous (u32, u32, u32),
@@ -1693,7 +1700,7 @@ enum ServerCommand {
     BeginConnection (String, String, String, tokio::sync::mpsc::Sender<InitialSetupCommand>), // password, banner, mode, outgoing pipe. god i've got to clean this up. vomiting face.
     WinningBanner (usize, bool), // report a banner that is alive and whether or not the player is an rtf. the server will do some routines.
     ReadyState (bool),
-    GodDisconnect (usize) // disconnect a player
+    GodDisconnect (usize) // disconnect a player   
 }
 
 const WORDLIST : [&str; 10] = ["Robust", "Nancy", "Sovereign", "Green", "Tailor", "Water", "Freebase", "Neon", "Morlock", "Rastafari"];
@@ -1784,6 +1791,16 @@ async fn main(){
                 command = commandget.recv() => {
                     //println!("honk");
                     match command {
+                        Some (ServerCommand::ChristmasExclusive (n)) => {
+                            for obj in &mut server.objects {
+                                if obj.get_banner() == n { // this player is now the warrior of God. all current weapons are like a hundred times more powerful.
+                                    obj.exposed_properties.health_properties.max_health *= 10.0;
+                                    obj.exposed_properties.health_properties.health = obj.exposed_properties.health_properties.max_health;
+                                    obj.exposed_properties.shooter_properties.counter /= 3;
+                                }
+                            }
+                            server.broadcast_tx.send(ClientCommand::ScoreTo (n, 100000)).unwrap();
+                        },
                         Some (ServerCommand::GodDisconnect (n)) => {
                             server.broadcast_tx.send(ClientCommand::Close (n)).unwrap();
                         }
