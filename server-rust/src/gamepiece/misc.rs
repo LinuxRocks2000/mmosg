@@ -23,7 +23,9 @@ pub struct GreenThumb {
     countdown : u16
 }
 pub struct Carrier {
-    angle_v : f32
+    angle_v : f32,
+    green_thumbs : u16,
+    gt_count : u16
 }
 pub struct Radiation {
     halflife : f32,
@@ -66,7 +68,9 @@ impl Seed {
 impl Carrier {
     pub fn new() -> Self {
         Self {
-            angle_v : 0.0
+            angle_v : 0.0,
+            green_thumbs : 0,
+            gt_count : 10
         }
     }
 }
@@ -241,7 +245,7 @@ impl GamePiece for Carrier {
         thing.collision_info.damage = 1.0;
         thing.physics.speed_cap = 12.0;
         thing.carrier_properties.space_remaining = 10;
-        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't', 'T', 'n', 'm', 'g'];
+        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't', 'T', 'n', 'm', 'g', 'G'];
         thing.health_properties.prevent_friendly_fire = true;
     }
 
@@ -253,13 +257,15 @@ impl GamePiece for Carrier {
         'K'
     }
     
-    fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {
+    fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
         let vec_to = Vector2::new(properties.goal_x - properties.physics.cx(), properties.goal_y - properties.physics.cy());
         let mut thrust = Vector2::new_from_manda(1.0, properties.physics.angle());
         let mut l = loopize(properties.physics.angle(), vec_to.angle());
+        let mut reversed = false;
         if l.abs() > 3.0 * PI/4.0 {
             l = loopize(properties.physics.angle() - PI, vec_to.angle());
             thrust *= -1.0;
+            reversed = true;
         }
         if vec_to.magnitude() < 10.0 {
             l = loopize(properties.physics.angle(), properties.goal_a);
@@ -276,6 +282,14 @@ impl GamePiece for Carrier {
         }
         self.angle_v = -l * 3.0/4.0;
         properties.physics.set_angle(properties.physics.angle() + self.angle_v);
+        if self.green_thumbs == 10 {
+            self.gt_count -= 1;
+            if self.gt_count == 0 {
+                self.gt_count = 10;
+                let point = properties.physics.extend_point(-220.0 * if reversed { -1.0 } else { 1.0 }, 0.0);
+                server.place_seed(point.x, point.y, None);
+            }
+        }
     }
 
     fn cost(&self) -> i32 {
@@ -287,6 +301,12 @@ impl GamePiece for Carrier {
     }
 
     fn on_carry(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties, server : &mut Server) { // when a new object becomes carried by this
+        if thing.value == 'G' {
+            self.green_thumbs += 1;
+            if self.green_thumbs == 10 {
+                server.send_to(ServerToClient::Leprechaun, me.banner);
+            }
+        }
         thing.goal_x = -1.0;
         if thing.value == 'h' {
             me.physics.speed_cap += 3.0;
@@ -378,6 +398,9 @@ x|----|----|----|----|----|
     }
 
     fn drop_carry(&mut self, me : &mut ExposedProperties, thing : &mut ExposedProperties) {
+        if thing.value == 'G' {
+            self.green_thumbs -= 1;
+        }
         let berth_y : bool = thing.carrier_properties.berth % 2 == 0;
         let berth_x : usize = thing.carrier_properties.berth / 2;
         let outsize =  if thing.physics.shape.w > thing.physics.shape.h { thing.physics.shape.w } else { thing.physics.shape.h };

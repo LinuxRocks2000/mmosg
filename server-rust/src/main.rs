@@ -89,7 +89,8 @@ pub enum ServerToClient {
     SeedCompletion (u32, u16), // seed id, completion value
     Carry (u32, u32), // carrier, carried
     UnCarry (u32), // no longer carrying this guy
-    YouAreGod // you are God
+    YouAreGod, // you are God
+    Leprechaun // we enable the leppy kaun
 }
 
 #[derive(ProtocolFrame, Debug, Clone)]
@@ -500,7 +501,7 @@ impl Server {
         }
         self.objects[carrier].exposed_properties = carrier_props;
         self.objects[carried].exposed_properties = carried_props;
-        self.send_to(ServerToClient::Carry (self.objects[carrier].get_id(), self.objects[carried].get_id()), self.objects[carried].get_banner());
+        self.broadcast(ServerToClient::Carry (self.objects[carrier].get_id(), self.objects[carried].get_id()));
         // NOTE: If this doesn't work because of the borrow checker mad at having 2 (3???) mutable references to self.objects, just use copying on the ExposedProperties!
         // Since carrying is a relatively rare operation, the wastefulness is not significant.
     }
@@ -1505,7 +1506,7 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
                         }*/
                     },
                     Ok (ClientCommand::Christmas) => {
-                        moi.collect(10000).await;
+                        moi.collect(1000000).await;
                     },
                     Ok (ClientCommand::RoleCall) => {
                         if !dead {
@@ -1943,11 +1944,12 @@ async fn main(){
                                 println!("yuh");
                             }
                             server.clear_of_banner(banner);
+                            if server.clients_connected > 0 {
+                                server.clients_connected -= 1;
+                            }
+                            println!("Client disconnected! Connected clients: {}, living players: {}", server.clients_connected, server.living_players);
                             if server.clients_connected == 0 {
                                 server.reset();
-                            }
-                            else {
-                                server.clients_connected -= 1;
                             }
                         },
                         Some (ServerCommand::Connect) => {
