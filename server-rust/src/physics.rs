@@ -1,4 +1,6 @@
 use crate::vector::Vector2;
+use std::f32::consts::PI;
+use crate::functions::loopize;
 
 #[derive(Copy, Clone, Debug)]
 pub struct BoxShape {
@@ -30,6 +32,51 @@ impl BoxShape {
             a : 0.0
         }
     }
+
+    pub fn ray_intersect(&self, pos : Vector2, ang : f32) -> Option<Vector2> { // return Some(position) if there's an intersection with the line at position, and None if there ain't.
+        let pos = if self.a == 0.0 {
+            pos
+        } else {
+            pos.rotate_about(Vector2::new(self.x, self.y), -self.a)
+        };
+        let ang = ang - self.a;
+        let slope = ang.tan(); // tan(a) returns the slope of the line with angle a
+        let l_side = (self.x - self.w/2.0 - pos.x) * slope + pos.y;
+        let r_side = (self.x + self.w/2.0 - pos.x) * slope + pos.y;
+        let t_side = (self.y - self.h/2.0 - pos.y) * (1.0 / slope) + pos.x;
+        let b_side = (self.y + self.h/2.0 - pos.y) * (1.0 / slope) + pos.x;
+        let mut r : [Option<Vector2>; 4] = [None; 4];
+        if (t_side - self.x).abs() <= self.w / 2.0 {
+            r[0] = Some(Vector2::new(t_side, self.y - self.h / 2.0));
+        }
+        if (b_side - self.x).abs() <= self.w / 2.0 {
+            r[1] = Some(Vector2::new(b_side, self.y + self.h / 2.0));
+        }
+        if (l_side - self.y).abs() <= self.h / 2.0 {
+            r[2] = Some(Vector2::new(self.x - self.w/2.0, l_side));
+        }
+        if (r_side - self.y).abs() <= self.h / 2.0 {
+            r[3] = Some(Vector2::new(self.x + self.w/2.0, r_side));
+        }
+        let pos = pos.rotate_about(Vector2::new(self.x, self.y), self.a);
+        let ang = ang + self.a;
+        let mut ret = None;
+        let mut closest = 0.0;
+        for i in 0..4 {
+            if let Some(point) = r[i] {
+                let point = point.rotate_about(Vector2::new(self.x, self.y), self.a);
+                if loopize((point - pos).angle(), ang).abs() < PI / 2.0 {
+                    let dist = (pos - point).magnitude();
+                    if ret.is_none() || dist < closest {
+                        ret = Some(point);
+                        closest = dist;
+                    }
+                }
+            }
+        }
+        ret
+    } // I kinda did a :landgreen: in this function with the copypasta
+    // needs housekeeping
 
     pub fn get_perp_axes(&self) -> [Vector2; 2] {
         let v = Vector2::new_from_manda(1.0, self.a);
@@ -274,6 +321,6 @@ impl PhysicsObject {
     }
 
     pub fn extend_point(&self, amount : f32, off : f32) -> Vector2 {
-        self.vector_position() + Vector2::new_from_manda(amount, self.angle() + off)
+        self.vector_position() + Vector2::new_from_manda(amount, self.angle() + off) - self.velocity
     }
 }

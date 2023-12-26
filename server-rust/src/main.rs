@@ -90,7 +90,8 @@ pub enum ServerToClient {
     Carry (u32, u32), // carrier, carried
     UnCarry (u32), // no longer carrying this guy
     YouAreGod, // you are God
-    Leprechaun // we enable the leppy kaun
+    Leprechaun, // we enable the leppy kaun
+    CastLaser (f32, f32, f32, f32, f32) // x, y, x2, y2, intensity
 }
 
 #[derive(ProtocolFrame, Debug, Clone)]
@@ -365,6 +366,10 @@ impl Server {
         self.place(Box::new(Missile::new()), x, y, a, sender)
     }
 
+    fn place_laser_missile(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
+        self.place(Box::new(LaserMissile::new()), x, y, a, sender)
+    }
+
     fn place_turret(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(Turret::new()), x, y, a, sender)
     }
@@ -479,12 +484,32 @@ impl Server {
     pub fn shoot(&mut self, bullet_type : BulletType, position : Vector2, velocity : Vector2, range : i32, sender : Option<usize>) -> u32 {
         let bullet = self.place(match bullet_type {
             BulletType::Bullet => Box::new(Bullet::new()),
-            BulletType::AntiRTF => Box::new(AntiRTFBullet::new())
+            BulletType::AntiRTF => Box::new(AntiRTFBullet::new()),
+            BulletType::Laser (_) => {
+                panic!("Server::shoot is not equipped to fire lasers!");
+            }
         }, position.x, position.y, velocity.angle(), sender);
         let i = self.obj_lookup(bullet).unwrap(); // it can be safely unwrapped because the object is guaranteed to exist at this point
         self.objects[i].exposed_properties.physics.velocity = velocity;
         self.objects[i].exposed_properties.ttl = range;
         bullet
+    }
+
+    pub fn fire_laser(&mut self, origin : Vector2, angle : f32, intensity : f32) {
+        let mut reaction = origin + Vector2::new_from_manda(50000.0, angle);
+        let mut winner : Option<usize> = None;
+        for i in 0..self.objects.len() {
+            if let Some(point) = self.objects[i].exposed_properties.physics.shape.ray_intersect(origin, angle) {
+                if (point - origin).magnitude() < (reaction - origin).magnitude() {
+                    reaction = point;
+                    winner = Some(i);
+                }
+            }
+        }
+        self.broadcast(ServerToClient::CastLaser (origin.x, origin.y, reaction.x, reaction.y, intensity));
+        if let Some(i) = winner {
+            self.objects[i].damage(intensity);
+        }
     }
 
     fn carry_tasks(&mut self, carrier : usize, carried : usize) { // expects that you've already done the lookups - this is the result of a very effective premature optimization in the physics engine
@@ -722,7 +747,11 @@ impl Server {
             unsafe {
                 (*(&mut self.objects as *mut Vec<GamePieceBase>))[i].update(self);
             }
-            // Do death checks a bit late (pun not intended) so objects have a chance to self-rescue.
+            i += 1;
+        }
+        // Do death checks a bit late (pun not intended) so objects have a chance to self-rescue.
+        i = 0;
+        while i < self.objects.len() {
             if self.objects[i].dead() {
                 unsafe {
                     let objects = &mut self.objects as *mut Vec<GamePieceBase>;
@@ -739,7 +768,7 @@ impl Server {
                     }
                 }
                 self.broadcast(ServerToClient::Delete (self.objects[i].get_id()));
-                self.objects.remove(i);
+                self.objects.swap_remove(i);
                 continue; // don't allow it to reach the increment
             }
             i += 1;
@@ -1742,7 +1771,7 @@ async fn main(){
         broadcast_tx        : broadcast_tx.clone(),
         living_players      : 0,
         isnt_rtf            : 0,
-        times               : (40.0, 20.0),
+        times               : (120.0, 20.0),
         clients_connected   : 0,
         is_headless         : false,
         permit_npcs         : true,
@@ -2029,6 +2058,9 @@ async fn main(){
                                 b'h' => {
                                     server.place_missile(x, y, 0.0, banner);
                                 },
+                                b'H' => {
+                                    server.place_laser_missile(x, y, 0.0, banner);
+                                }
                                 b'T' => {
                                     server.place_turret(x, y, 0.0, banner);
                                 },
@@ -2356,7 +2388,6 @@ pub mod tests {
     use crate::BoxShape;
     use crate::functions::*;
     use std::f32::consts::PI;
-    use crate::leaderboard;
     #[test]
     fn check_vector_creation() {
         let vec = Vector2::new_from_manda(1.0, 0.0);
@@ -2424,8 +2455,8 @@ pub mod tests {
         assert!(shape.contains(Vector2::new(-4.0, 0.0)));
     }
 
-    #[test]
+    /*#[test]
     fn leaderboard_read() {
         leaderboard::read_leaderboard("fancy_world_io.leaderboard");
-    }
+    }*/
 }

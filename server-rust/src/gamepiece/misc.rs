@@ -22,6 +22,7 @@ pub struct MissileLaunchingSystem {}
 pub struct GreenThumb {
     countdown : u16
 }
+pub struct LaserMissile {}
 pub struct Carrier {
     angle_v : f32,
     green_thumbs : u16,
@@ -52,6 +53,12 @@ impl Bullet {
         Self {
 
         }
+    }
+}
+
+impl LaserMissile {
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -199,7 +206,7 @@ impl GamePiece for GreenThumb {
     fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
         self.countdown -= 1;
         if self.countdown == 0 {
-            self.countdown = (800 + 800) / 30; // there are 20 chests around it, 1200 is the average chest lifetime.
+            self.countdown = (800 + 800) / 30 + 20; // there are 30 chests around it, 1600 is the average chest lifetime, add a bit to keep from overlapping.
             let vec = properties.physics.vector_position() + Vector2::new_from_manda(200.0, properties.physics.angle());
             server.place_seed(vec.x, vec.y, Some(properties.banner));
             properties.physics.set_angle(properties.physics.angle() + 2.0 * PI / 30.0);
@@ -245,7 +252,7 @@ impl GamePiece for Carrier {
         thing.collision_info.damage = 1.0;
         thing.physics.speed_cap = 12.0;
         thing.carrier_properties.space_remaining = 10;
-        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't', 'T', 'n', 'm', 'g', 'G'];
+        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't', 'T', 'n', 'm', 'g', 'G', 'H'];
         thing.health_properties.prevent_friendly_fire = true;
     }
 
@@ -764,5 +771,60 @@ impl GamePiece for Block {
 
     fn obtain_physics(&self) -> PhysicsObject {
         PhysicsObject::new(0.0, 0.0, 300.0, 300.0, 0.0)
+    }
+}
+
+impl GamePiece for LaserMissile {
+    fn construct(&self, me : &mut ExposedProperties) {
+        me.shooter_properties.bullet_type = BulletType::Laser (0.3);
+        me.shooter_properties.counter = 1;
+        me.shooter_properties.shoot = true;
+        me.carrier_properties.can_update = true;
+    }
+
+    fn obtain_physics(&self) -> PhysicsObject {
+        PhysicsObject::new(0.0, 0.0, 48.0, 20.0, 0.0)
+    }
+
+    fn identify(&self) -> char {
+        'H'
+    }
+
+    fn get_does_collide(&self, _id : char) -> bool {
+        true
+    }
+
+    fn cost(&self) -> i32 {
+        30
+    }
+
+    fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
+        if properties.carrier_properties.is_carried {
+            if let Some(carrier) = server.obj_lookup(properties.carrier_properties.carrier) {
+                if properties.carrier_properties.berth > 7 {
+                    properties.physics.set_angle(server.objects[carrier].exposed_properties.physics.angle());
+                }
+                else if properties.carrier_properties.berth < 2 {
+                    properties.physics.set_angle(server.objects[carrier].exposed_properties.physics.angle() + PI);
+                }
+                else if properties.carrier_properties.berth % 2 == 0 {
+                    properties.physics.set_angle(server.objects[carrier].exposed_properties.physics.angle() - PI / 2.0);
+                }
+                else {
+                    properties.physics.set_angle(server.objects[carrier].exposed_properties.physics.angle() + PI / 2.0);
+                }
+            }
+        }
+        else {
+            let goal = Vector2::new(properties.goal_x - properties.physics.cx(), properties.goal_y - properties.physics.cy());
+            properties.physics.set_angle(properties.physics.angle() * 0.9 + goal.angle() * 0.1);
+            let thrust = Vector2::new_from_manda(0.3, properties.physics.angle());
+            properties.physics.velocity = properties.physics.velocity + thrust;
+            properties.physics.velocity = properties.physics.velocity * 0.98;
+        }
+    }
+
+    fn is_editable(&self) -> bool {
+        true
     }
 }

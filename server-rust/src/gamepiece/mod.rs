@@ -51,7 +51,8 @@ pub enum TargetingMode {
 #[derive(Clone, Copy)]
 pub enum BulletType {
     Bullet,
-    AntiRTF
+    AntiRTF,
+    Laser (f32) // laser intensity
 }
 
 #[derive(Clone, Copy)]
@@ -530,9 +531,14 @@ impl GamePieceBase {
 
     pub fn shawty(&mut self, range : i32, server : &mut Server) {
         for angle in &self.exposed_properties.shooter_properties.angles {
-            let bullet_id = server.shoot(self.exposed_properties.shooter_properties.bullet_type, self.exposed_properties.physics.extend_point(50.0, *angle), Vector2::new_from_manda(20.0, self.exposed_properties.physics.angle() + *angle) + self.exposed_properties.physics.velocity, range, None);
-            let bullet = server.obj_lookup(bullet_id).unwrap(); // Unwrap is safe here because the object is guaranteed to exist at this point.
-            server.objects[bullet].set_banner(self.banner); // Set the banner.
+            if let BulletType::Laser (intensity) = self.exposed_properties.shooter_properties.bullet_type {
+                server.fire_laser(self.exposed_properties.physics.extend_point(50.0, *angle), *angle + self.exposed_properties.physics.angle(), intensity);
+            }
+            else {
+                let bullet_id = server.shoot(self.exposed_properties.shooter_properties.bullet_type, self.exposed_properties.physics.extend_point(50.0, *angle), Vector2::new_from_manda(20.0, self.exposed_properties.physics.angle() + *angle) + self.exposed_properties.physics.velocity, range, None);
+                let bullet = server.obj_lookup(bullet_id).unwrap(); // Unwrap is safe here because the object is guaranteed to exist at this point.
+                server.objects[bullet].set_banner(self.banner); // Set the banner.
+            }
         }
     }
 
@@ -713,7 +719,7 @@ impl GamePiece for Castle {
             id != 'c' // The only thing RTFs don't collide with is castles. After all, they *are* a type of fighter.
         }
         else {
-            id == 'b' || id == 'r' || id == 'h' // All they collide with is bullets and radiation.
+            id == 'b' || id == 'r' || id == 'h' // All castles collide with is bullets and radiation.
         }
     }
 

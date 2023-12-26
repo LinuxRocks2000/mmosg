@@ -5,6 +5,7 @@ use crate::Server;
 use crate::physics::PhysicsObject;
 use crate::vector::Vector2;
 use crate::ExposedProperties;
+use crate::BulletType;
 
 
 pub struct BasicFighter {}
@@ -75,6 +76,16 @@ impl GamePiece for BasicFighter {
 
     fn is_editable(&self) -> bool {
         true
+    }
+
+    fn on_upgrade(&mut self, properties : &mut ExposedProperties, upgrade : &String) {
+        match upgrade.as_str() {
+            "s" => {
+                properties.shooter_properties.bullet_type = BulletType::Laser (1.0);
+                properties.shooter_properties.counter = 1;
+            }
+            _ => {}
+        }
     }
 }
 
