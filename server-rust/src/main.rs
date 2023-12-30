@@ -646,6 +646,8 @@ impl Server {
                     if !self.objects[y].exposed_properties.physics.fixed {
                         self.objects[y].exposed_properties.physics.shape.translate(intasectah.1 * -1.0 * (1.0 - ratio));
                     }
+                    self.objects[x].exposed_properties.physics.invalid = true;
+                    self.objects[y].exposed_properties.physics.invalid = true;
                     if sum != 0.0 {
                         // WIP real collisions - very complex, I don't know enough physics rn but am learning
                         /*let m1 = self.objects[y].physics.mass;
