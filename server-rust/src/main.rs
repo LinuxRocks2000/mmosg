@@ -64,7 +64,7 @@ pub struct Client {
 #[derive(ProtocolFrame, Debug, Clone)]
 pub enum ServerToClient {
     Pong,
-    Tick (u32, u8), // counter, mode.
+    Tick (u32, u32, u8), // counter, absolute frame, mode.
     HealthUpdate (u32, f32), // update the health for any object.
     SetPasswordless (bool), 
     BannerAdd (u32, String), // banner id, banner text
@@ -83,13 +83,15 @@ pub enum ServerToClient {
     Add (u32),
     Radiate (u32, f32),
     New (u32, u8, f32, f32, f32, bool, u32, f32, f32), // id, type, x, y, a, editable, banner, w, h
-    MoveObjectFull (u32, f32, f32, f32, f32, f32), // id, x, y, a, w, h. inefficient (25 bytes altogether); use a smaller one like MoveObjectXY or MoveObjectA or MoveObjectXYA if possible.
+    TrajectoryUpdate (u32, u32, f32, f32, f32, f32), // update the trajectory of an object. id, start frame, x, y, xv, yv (where xv and yv are in MMOSG units per frame, to be linearly interpolated)
+    UpdateObject (u32, f32, f32, f32), // update the angle and size of an object. id, angle, width, height.
     Delete (u32),
     Tie,
     SeedCompletion (u32, u16), // seed id, completion value
     Carry (u32, u32), // carrier, carried
     UnCarry (u32), // no longer carrying this guy
     YouAreGod, // you are God
+    // TODO: make God and Leprechaun and etc part of EasterEgg(u16)
     Leprechaun, // we enable the leppy kaun
     CastLaser (f32, f32, f32, f32, f32) // x, y, x2, y2, intensity
 }
@@ -136,7 +138,7 @@ struct TeamData {
 enum ClientCommand { // Commands sent to clients
     Send (ServerToClient),
     SendTo (ServerToClient, usize),
-    Tick (u32, GameMode),
+    Tick (u32, u32, GameMode), // counter, abs counter, mode
     ScoreTo (usize, i32),
     CloseAll,
     ChatRoom (String, usize, u8, Option<usize>), // message, sender, priority
@@ -164,6 +166,7 @@ pub struct Server {
     terrain_seed      : u32,
     top_id            : u32,
     counter           : u32,
+    absolute_frame    : u32, // the sum total of every count so far, including those in Waiting mode
     costs             : bool, // Whether or not to cost money when placing a piece
     place_timer       : u32,
     autonomous        : Option<(u32, u32, u32, u32)>,
@@ -477,8 +480,8 @@ impl Server {
             //let mut objects = *(&mut self.objects as *mut Vec<GamePieceBase>);
             (*(&mut self.objects as *mut Vec<GamePieceBase>))[carrier].update_carried(self);
         }
-        let phys = self.objects[thing].exposed_properties.physics.shape;
-        self.broadcast(ServerToClient::MoveObjectFull (id, phys.x, phys.y, phys.a, phys.w, phys.h));
+        //let phys = self.objects[thing].exposed_properties.physics.shape;
+        //self.broadcast(ServerToClient::MoveObjectFull (id, phys.x, phys.y, phys.a, phys.w, phys.h));
     }
 
     pub fn shoot(&mut self, bullet_type : BulletType, position : Vector2, velocity : Vector2, range : i32, sender : Option<usize>) -> u32 {
@@ -726,11 +729,21 @@ impl Server {
             //let mut args_vec = vec![self.objects[i].get_id().to_string()];
             let id = self.objects[i].get_id();
             let phys = self.objects[i].get_physics_object();
-            if phys.translated() || phys.rotated() || phys.resized() {
-                let command = ServerToClient::MoveObjectFull (id, phys.shape.x, phys.shape.y, phys.shape.a, phys.shape.w, phys.shape.h);
+            // old version that used absolute position instead of trajectory data
+            if phys.rotated() || phys.resized() {
+                let command = ServerToClient::UpdateObject (id, phys.shape.a, phys.shape.w, phys.shape.h);
+                self.broadcast(command);
+            }
+            let phys = self.objects[i].get_physics_object();
+            if phys.old_velocity != phys.velocity {
+                let command = ServerToClient::TrajectoryUpdate (id, self.absolute_frame, phys.shape.x, phys.shape.y, phys.velocity.x, phys.velocity.y);
                 self.broadcast(command);
             }
             /*DON'T DELETE THIS
+            //
+            // you tried to delete this on Thursday, December 28th of 2023 at 1848 hours. you will try it again.
+            // +-+-+-+ don't forget what happened +-+-+-+
+            //
             if phys.rotated() || phys.resized() {
                 args_vec.push(phys.angle().to_string());
             }
@@ -812,6 +825,7 @@ impl Server {
         if self.authenticateds == 0 { // nothing happens if there isn't anyone for it to happen to
             return;
         }
+        self.absolute_frame += 1;
         if self.mode == GameMode::Waiting {
             if self.is_io {
                 self.start();
@@ -827,7 +841,7 @@ impl Server {
                     }
                     if is_has_moreteam {
                         self.autonomous.as_mut().unwrap().2 -= 1;
-                        self.broadcast(ServerToClient::Tick (self.autonomous.as_ref().unwrap().2, 2));
+                        self.broadcast(ServerToClient::Tick (self.autonomous.as_ref().unwrap().2, self.absolute_frame, 2));
                         if self.autonomous.unwrap().2 <= 0 {
                             self.start();
                         }
@@ -871,7 +885,7 @@ impl Server {
             if self.mode == GameMode::Play {
                 self.send_physics_updates();
             }
-            self.broadcast_tx.send(ClientCommand::Tick (self.counter, self.mode)).expect("Broadcast failed");
+            self.broadcast_tx.send(ClientCommand::Tick (self.counter, self.absolute_frame, self.mode)).expect("Broadcast failed");
             if self.mode == GameMode::Play {
                 self.deal_with_objects();
                 self.place_timer -= 1;
@@ -1052,6 +1066,7 @@ impl Server {
         self.isnt_rtf = 0;
         self.living_players = 0;
         self.clients_connected = 0;
+        self.absolute_frame = 0;
         self.set_mode(GameMode::Waiting);
         self.clear_banners();
         self.load_config();
@@ -1508,7 +1523,7 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
                             break 'cliloop;
                         }
                     },
-                    Ok (ClientCommand::Tick (counter, mode)) => {
+                    Ok (ClientCommand::Tick (counter, abs_counter, mode)) => {
                         moi.game_cmode = mode;
                         if mode == GameMode::Play { // if it's play mode
                             moi.walls_remaining = moi.walls_cap; // it can't use 'em until next turn, ofc
@@ -1516,7 +1531,7 @@ async fn got_client(client : WebSocketClientStream, broadcaster : tokio::sync::b
                         }
                         //let mut schlock = server.lock().await;
                         //schlock.winning_banner = moi.banner;
-                        moi.send_protocol_message(ServerToClient::Tick (counter, match mode {
+                        moi.send_protocol_message(ServerToClient::Tick (counter, abs_counter, match mode {
                             GameMode::Play => 0, 
                             GameMode::Strategy => 1,
                             GameMode::Waiting => 2
@@ -1750,6 +1765,7 @@ async fn main(){
         }
     }
     let mut server = Server {
+        absolute_frame      : 0,
         self_test           : false,
         mode                : GameMode::Waiting,
         admin_password,

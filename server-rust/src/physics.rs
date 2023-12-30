@@ -220,6 +220,7 @@ pub struct PhysicsObject {
     pub shape         : BoxShape,
     pub old_shape     : BoxShape,
     pub velocity      : Vector2,
+    pub old_velocity  : Vector2,
     pub solid         : bool,
     pub angle_v       : f32,
     pub mass          : f32,
@@ -238,6 +239,7 @@ impl PhysicsObject {
             },
             old_shape : BoxShape::empty(),
             velocity : Vector2::empty(),
+            old_velocity : Vector2::empty(),
             solid : false, // Everything is solid by default
             angle_v : 0.0,
             fixed : false,
@@ -271,6 +273,7 @@ impl PhysicsObject {
     pub fn update(&mut self) { // Since this is "newtonian", you should never directly change x and y, and instead change the velocity vector.
         if !self.fixed {
             self.old_shape = self.shape;
+            self.old_velocity = self.velocity;
             self.shape.translate(self.velocity);
             self.shape.rotate(self.angle_v);
         }
