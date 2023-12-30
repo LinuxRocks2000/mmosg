@@ -17,7 +17,9 @@ pub struct Bullet {}
 pub struct AntiRTFBullet {}
 pub struct Wall {}
 pub struct Chest {}
-pub struct Turret {}
+pub struct Turret {
+    is_laser_turret : bool
+}
 pub struct MissileLaunchingSystem {}
 pub struct GreenThumb {
     countdown : u16
@@ -113,7 +115,9 @@ impl Air2Air {
 
 impl Turret {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            is_laser_turret : false
+        }
     }
 }
 
@@ -636,7 +640,7 @@ impl GamePiece for Turret {
                 }
             },
             None => {
-                if properties.carrier_properties.is_carried {
+                if properties.carrier_properties.is_carried || self.is_laser_turret {
                     properties.shooter_properties.suppress = true;
                 }
             }
@@ -648,7 +652,24 @@ impl GamePiece for Turret {
     }
 
     fn cost(&self) -> i32 {
-        100
+        if self.is_laser_turret {
+            200
+        }
+        else {
+            100
+        }
+    }
+
+    fn on_upgrade(&mut self, properties : &mut ExposedProperties, upgrade : &String) {
+        match upgrade.as_str() {
+            "laser" => {
+                properties.targeting.filter = TargetingFilter::Farmer;
+                properties.shooter_properties.bullet_type = BulletType::Laser (0.3, 1000.0);
+                properties.shooter_properties.counter = 1;
+                self.is_laser_turret = true;
+            },
+            _ => {}
+        }
     }
 }
 
@@ -776,7 +797,7 @@ impl GamePiece for Block {
 
 impl GamePiece for LaserMissile {
     fn construct(&self, me : &mut ExposedProperties) {
-        me.shooter_properties.bullet_type = BulletType::Laser (0.3);
+        me.shooter_properties.bullet_type = BulletType::Laser (0.3, 50000.0);
         me.shooter_properties.counter = 1;
         me.shooter_properties.shoot = true;
         me.carrier_properties.can_update = true;

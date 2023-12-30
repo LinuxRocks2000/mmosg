@@ -80,10 +80,10 @@ impl GamePiece for BasicFighter {
 
     fn on_upgrade(&mut self, properties : &mut ExposedProperties, upgrade : &String) {
         match upgrade.as_str() {
-            "s" => {
-                properties.shooter_properties.bullet_type = BulletType::Laser (1.0);
+            "laser" => {
+                properties.shooter_properties.bullet_type = BulletType::Laser (0.3, 50000.0);
                 properties.shooter_properties.counter = 1;
-            }
+            },
             _ => {}
         }
     }

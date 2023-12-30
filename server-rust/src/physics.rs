@@ -227,7 +227,8 @@ pub struct PhysicsObject {
     pub fixed         : bool,
     pub restitution   : f32,
     pub portals       : bool,
-    pub speed_cap     : f32
+    pub speed_cap     : f32,
+    pub invalid       : bool
 }
 
 
@@ -246,7 +247,8 @@ impl PhysicsObject {
             mass : w * h, // Assume a density of 1. If you want to change the *density* elsewhere, just multiply it by the new density!
             restitution : 0.5, // Assume collisions are truly inelastic by default
             portals : false,
-            speed_cap : 0.0
+            speed_cap : 0.0,
+            invalid : true
         }
     }
 
@@ -273,9 +275,11 @@ impl PhysicsObject {
     pub fn update(&mut self) { // Since this is "newtonian", you should never directly change x and y, and instead change the velocity vector.
         if !self.fixed {
             self.old_shape = self.shape;
-            self.old_velocity = self.velocity;
             self.shape.translate(self.velocity);
             self.shape.rotate(self.angle_v);
+            if self.velocity.magnitude() < 0.05 {
+                self.velocity.zero();
+            }
         }
     }
 

@@ -117,6 +117,15 @@ impl Vector2 {
         (self.magnitude() - mag).abs() < 0.001
     }
 
+    pub fn is_basically_eq(&self, thing : Vector2) -> bool {
+        (*self - thing).magnitude() <= (1.0 - 1.0/(1.0 + self.magnitude())) * 0.1 // more accuracy is required at smaller and smaller vector resolutions
+    }
+
+    pub fn zero(&mut self) {
+        self.x = 0.0;
+        self.y = 0.0;
+    }
+
     pub fn sqrt(&self) -> Vector2 {
         Vector2::new_from_manda(self.magnitude().sqrt(), self.angle())
     }

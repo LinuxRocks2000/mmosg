@@ -93,7 +93,7 @@ pub enum ServerToClient {
     YouAreGod, // you are God
     // TODO: make God and Leprechaun and etc part of EasterEgg(u16)
     Leprechaun, // we enable the leppy kaun
-    CastLaser (f32, f32, f32, f32, f32) // x, y, x2, y2, intensity
+    CastLaser (f32, f32, f32, f32, f32, u8) // x, y, x2, y2, intensity, caster type
 }
 
 #[derive(ProtocolFrame, Debug, Clone)]
@@ -256,6 +256,13 @@ impl Server {
         }
     }
 
+    fn upgrade(&mut self, thing : u32, upgrade : String) {
+        if let Some(i) = self.obj_lookup(thing) {
+            self.objects[i].upgrade(upgrade.clone());
+            self.broadcast(ServerToClient::UpgradeThing (thing, upgrade.clone()));
+        }
+    }
+
     fn is_clear(&self, x : f32, y : f32) -> bool {
         for obj in &self.objects {
             if self.object_field_check(obj.exposed_properties.physics.shape, x, y, 800.0) {
@@ -377,6 +384,12 @@ impl Server {
         self.place(Box::new(Turret::new()), x, y, a, sender)
     }
 
+    fn place_laser_turret(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
+        let thing = self.place(Box::new(Turret::new()), x, y, a, sender);
+        self.upgrade(thing, "laser".to_string());
+        thing
+    }
+
     fn place_mls(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(MissileLaunchingSystem::new()), x, y, a, sender)
     }
@@ -488,7 +501,7 @@ impl Server {
         let bullet = self.place(match bullet_type {
             BulletType::Bullet => Box::new(Bullet::new()),
             BulletType::AntiRTF => Box::new(AntiRTFBullet::new()),
-            BulletType::Laser (_) => {
+            BulletType::Laser (_, _) => {
                 panic!("Server::shoot is not equipped to fire lasers!");
             }
         }, position.x, position.y, velocity.angle(), sender);
@@ -498,8 +511,8 @@ impl Server {
         bullet
     }
 
-    pub fn fire_laser(&mut self, origin : Vector2, angle : f32, intensity : f32) {
-        let mut reaction = origin + Vector2::new_from_manda(50000.0, angle);
+    pub fn fire_laser(&mut self, origin : Vector2, angle : f32, intensity : f32, range : f32, origintype : char) {
+        let mut reaction = origin + Vector2::new_from_manda(range, angle);
         let mut winner : Option<usize> = None;
         for i in 0..self.objects.len() {
             if let Some(point) = self.objects[i].exposed_properties.physics.shape.ray_intersect(origin, angle) {
@@ -509,7 +522,7 @@ impl Server {
                 }
             }
         }
-        self.broadcast(ServerToClient::CastLaser (origin.x, origin.y, reaction.x, reaction.y, intensity));
+        self.broadcast(ServerToClient::CastLaser (origin.x, origin.y, reaction.x, reaction.y, intensity, origintype as u8));
         if let Some(i) = winner {
             self.objects[i].damage(intensity);
         }
@@ -530,6 +543,7 @@ impl Server {
         self.objects[carrier].exposed_properties = carrier_props;
         self.objects[carried].exposed_properties = carried_props;
         self.broadcast(ServerToClient::Carry (self.objects[carrier].get_id(), self.objects[carried].get_id()));
+        self.objects[carried].exposed_properties.physics.invalid = true;
         // NOTE: If this doesn't work because of the borrow checker mad at having 2 (3???) mutable references to self.objects, just use copying on the ExposedProperties!
         // Since carrying is a relatively rare operation, the wastefulness is not significant.
     }
@@ -730,15 +744,17 @@ impl Server {
             let id = self.objects[i].get_id();
             let phys = self.objects[i].get_physics_object();
             // old version that used absolute position instead of trajectory data
-            if phys.rotated() || phys.resized() {
+            if phys.rotated() || phys.resized() || phys.invalid {
                 let command = ServerToClient::UpdateObject (id, phys.shape.a, phys.shape.w, phys.shape.h);
                 self.broadcast(command);
             }
             let phys = self.objects[i].get_physics_object();
-            if phys.old_velocity != phys.velocity {
+            if phys.old_velocity != phys.velocity || phys.invalid {
                 let command = ServerToClient::TrajectoryUpdate (id, self.absolute_frame, phys.shape.x, phys.shape.y, phys.velocity.x, phys.velocity.y);
+                phys.old_velocity = phys.velocity;
                 self.broadcast(command);
             }
+            self.objects[i].get_physics_object().invalid = false;
             /*DON'T DELETE THIS
             //
             // you tried to delete this on Thursday, December 28th of 2023 at 1848 hours. you will try it again.
@@ -825,7 +841,6 @@ impl Server {
         if self.authenticateds == 0 { // nothing happens if there isn't anyone for it to happen to
             return;
         }
-        self.absolute_frame += 1;
         if self.mode == GameMode::Waiting {
             if self.is_io {
                 self.start();
@@ -883,6 +898,7 @@ impl Server {
                 }
             }*/
             if self.mode == GameMode::Play {
+                self.absolute_frame += 1;
                 self.send_physics_updates();
             }
             self.broadcast_tx.send(ClientCommand::Tick (self.counter, self.absolute_frame, self.mode)).expect("Broadcast failed");
@@ -2065,6 +2081,9 @@ async fn main(){
                                 b'K' => {
                                     server.place_carrier(x, y, 0.0, banner);
                                 },
+                                b'L' => {
+                                    server.place_laser_turret(x, y, 0.0, banner);
+                                }
                                 b't' => {
                                     server.place_tie_fighter(x, y, 0.0, banner);
                                 },

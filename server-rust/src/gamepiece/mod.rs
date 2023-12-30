@@ -36,7 +36,8 @@ pub enum TargetingFilter {
     Any,
     Fighters,
     Castles,
-    RealTimeFighter
+    RealTimeFighter,
+    Farmer
 }
 
 
@@ -52,7 +53,7 @@ pub enum TargetingMode {
 pub enum BulletType {
     Bullet,
     AntiRTF,
-    Laser (f32) // laser intensity
+    Laser (f32, f32) // laser intensity, laser range
 }
 
 #[derive(Clone, Copy)]
@@ -379,6 +380,12 @@ impl GamePieceBase {
                 },
                 TargetingFilter::RealTimeFighter => {
                     object.identify() == 'R'
+                },
+                TargetingFilter::Farmer => {
+                    match object.identify() {
+                        'C' | 'h' | 'b' => true,
+                        _ => false
+                    }
                 }
             };
             match carrier {
@@ -531,8 +538,8 @@ impl GamePieceBase {
 
     pub fn shawty(&mut self, range : i32, server : &mut Server) {
         for angle in &self.exposed_properties.shooter_properties.angles {
-            if let BulletType::Laser (intensity) = self.exposed_properties.shooter_properties.bullet_type {
-                server.fire_laser(self.exposed_properties.physics.extend_point(50.0, *angle), *angle + self.exposed_properties.physics.angle(), intensity);
+            if let BulletType::Laser (intensity, range) = self.exposed_properties.shooter_properties.bullet_type {
+                server.fire_laser(self.exposed_properties.physics.extend_point(50.0, *angle) + self.exposed_properties.physics.velocity, *angle + self.exposed_properties.physics.angle(), intensity, range, self.identify());
             }
             else {
                 let bullet_id = server.shoot(self.exposed_properties.shooter_properties.bullet_type, self.exposed_properties.physics.extend_point(50.0, *angle), Vector2::new_from_manda(20.0, self.exposed_properties.physics.angle() + *angle) + self.exposed_properties.physics.velocity, range, None);
@@ -758,8 +765,10 @@ Upgrade tiers
             "b3" => {
                 properties.shooter_properties.range = 80;
             }
-            "b4" => {
-                properties.shooter_properties.angles = vec![-PI/2.0, -PI/2.0 - 0.2, -PI/2.0 + 0.2];
+            "b4" => { // high-intensity laser
+                properties.shooter_properties.bullet_type = BulletType::Laser (3.0, 5000.0);
+                properties.shooter_properties.counter = 10;
+                properties.repeater.max_repeats = 0;
             }
             "f" => { // fast
                 properties.physics.speed_cap = 30.0;
