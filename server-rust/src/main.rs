@@ -511,7 +511,7 @@ impl Server {
         bullet
     }
 
-    pub fn fire_laser(&mut self, origin : Vector2, angle : f32, intensity : f32, range : f32, origintype : char) {
+    pub fn fire_laser(&mut self, origin : Vector2, angle : f32, intensity : f32, range : f32, origintype : char, originbanner : Option<usize>) {
         let mut reaction = origin + Vector2::new_from_manda(range, angle);
         let mut winner : Option<usize> = None;
         for i in 0..self.objects.len() {
@@ -525,6 +525,11 @@ impl Server {
         self.broadcast(ServerToClient::CastLaser (origin.x, origin.y, reaction.x, reaction.y, intensity, origintype as u8));
         if let Some(i) = winner {
             self.objects[i].damage(intensity);
+            if let Some(banner) = originbanner {
+                if self.objects[i].dead() {
+                    self.score_to(banner, self.objects[i].capture() as i32);
+                }
+            }
         }
     }
 

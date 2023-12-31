@@ -539,7 +539,7 @@ impl GamePieceBase {
     pub fn shawty(&mut self, range : i32, server : &mut Server) {
         for angle in &self.exposed_properties.shooter_properties.angles {
             if let BulletType::Laser (intensity, range) = self.exposed_properties.shooter_properties.bullet_type {
-                server.fire_laser(self.exposed_properties.physics.extend_point(50.0, *angle) + self.exposed_properties.physics.velocity, *angle + self.exposed_properties.physics.angle(), intensity, range, self.identify());
+                server.fire_laser(self.exposed_properties.physics.extend_point(50.0, *angle) + self.exposed_properties.physics.velocity, *angle + self.exposed_properties.physics.angle(), intensity, range, self.identify(), Some(self.banner));
             }
             else {
                 let bullet_id = server.shoot(self.exposed_properties.shooter_properties.bullet_type, self.exposed_properties.physics.extend_point(50.0, *angle), Vector2::new_from_manda(20.0, self.exposed_properties.physics.angle() + *angle) + self.exposed_properties.physics.velocity, range, None);
