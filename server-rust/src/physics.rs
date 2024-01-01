@@ -84,13 +84,13 @@ impl BoxShape {
         [v, v2]
     }
 
-    pub fn points(&self) -> Vec<Vector2> {
+    pub fn points(&self) -> [Vector2; 4] {
         let to_origin = Vector2::new(self.x, self.y);
         let o_tl = Vector2::new(-self.w/2.0, -self.h/2.0);
         let o_tr = Vector2::new(self.w/2.0, -self.h/2.0);
         let o_bl = Vector2::new(-self.w/2.0, self.h/2.0);
         let o_br = Vector2::new(self.w/2.0, self.h/2.0);
-        vec![
+        [
             o_tl.rot(self.a) + to_origin,
             o_tr.rot(self.a) + to_origin,
             o_bl.rot(self.a) + to_origin,
@@ -300,10 +300,16 @@ impl PhysicsObject {
     }
 
     pub fn set_cx(&mut self, x : f32) {
+        if x != self.shape.x {
+            self.invalid = true;
+        }
         self.shape.x = x;
     }
 
     pub fn set_cy(&mut self, y : f32) {
+        if y != self.shape.y {
+            self.invalid = true;
+        }
         self.shape.y = y;
     }
 

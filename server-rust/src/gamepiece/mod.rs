@@ -455,8 +455,11 @@ impl GamePieceBase {
         if self.exposed_properties.carrier_properties.is_carried {
             self.exposed_properties.health_properties.health = self.exposed_properties.health_properties.max_health;
         }
-        if self.exposed_properties.carrier_properties.is_carried && !self.exposed_properties.carrier_properties.can_update {
-            return; // quick short circuit: can't update if it's being carried, carriers freeze all activity so it's nice and ready for when it comes back out
+        if self.exposed_properties.carrier_properties.is_carried {
+            self.exposed_properties.physics.invalid = true;
+            if !self.exposed_properties.carrier_properties.can_update {
+                return; // quick short circuit: can't update if it's being carried, carriers freeze all activity so it's nice and ready for when it comes back out
+            }
         }
         if self.piece.do_stream_health() {
             server.stream_health(self.exposed_properties.id, self.exposed_properties.health_properties.health / self.exposed_properties.health_properties.max_health);
