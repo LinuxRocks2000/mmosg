@@ -53,6 +53,7 @@ pub enum TargetingMode {
 pub enum BulletType {
     Bullet,
     AntiRTF,
+    Mortar (f32, f32, f32), // radius, intensity, force
     Laser (f32, f32) // laser intensity, laser range
 }
 

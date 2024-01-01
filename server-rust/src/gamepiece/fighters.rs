@@ -13,6 +13,7 @@ pub struct BasicFighter {}
 pub struct TieFighter {}
 pub struct Sniper {}
 pub struct Missile {}
+pub struct Artillery {}
 
 
 impl BasicFighter {
@@ -34,6 +35,12 @@ impl Sniper {
 }
 
 impl Missile {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Artillery {
     pub fn new() -> Self {
         Self {}
     }
@@ -203,6 +210,48 @@ impl GamePiece for Missile {
         let thrust = Vector2::new_from_manda(0.3, properties.physics.angle());
         properties.physics.velocity = properties.physics.velocity + thrust;
         properties.physics.velocity = properties.physics.velocity * 0.99;
+    }
+
+    fn is_editable(&self) -> bool {
+        true
+    }
+}
+
+impl GamePiece for Artillery {
+    fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
+        thing.shooter_properties.shoot = true;
+        thing.shooter_properties.bullet_type = BulletType::Mortar (200.0, 0.0, 600.0);
+        thing.shooter_properties.counter = 100;
+        thing.shooter_properties.range = 120;
+    }
+
+    fn obtain_physics(&self) -> PhysicsObject {
+        PhysicsObject::new(0.0, 0.0, 20.0, 50.0, 0.0)
+    }
+
+    fn identify(&self) -> char {
+        'A'
+    }
+
+    fn get_does_collide(&self, id : char) -> bool {
+        id != 'c'
+    }
+
+    fn cost(&self) -> i32 {
+        50
+    }
+
+    fn update(&mut self, properties : &mut ExposedProperties, _servah : &mut Server) {
+        let mut thrust = Vector2::new(properties.goal_x - properties.physics.cx(), properties.goal_y - properties.physics.cy());
+        if thrust.magnitude() < 10.0 {
+            properties.physics.set_angle(properties.goal_a);
+        }
+        else {
+            thrust = thrust.unit() * 0.1;
+            properties.physics.set_angle(thrust.angle());
+            properties.physics.velocity = properties.physics.velocity + thrust;
+        }
+        properties.physics.velocity = properties.physics.velocity * 0.95;
     }
 
     fn is_editable(&self) -> bool {

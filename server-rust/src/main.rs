@@ -369,6 +369,10 @@ impl Server {
         self.place(Box::new(TieFighter::new()), x, y, a, sender)
     }
 
+    fn place_artillery(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
+        self.place(Box::new(Artillery::new()), x, y, a, sender)
+    }
+
     fn place_sniper(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(Sniper::new()), x, y, a, sender)
     }
@@ -502,6 +506,7 @@ impl Server {
         let bullet = self.place(match bullet_type {
             BulletType::Bullet => Box::new(Bullet::new()),
             BulletType::AntiRTF => Box::new(AntiRTFBullet::new()),
+            BulletType::Mortar (radius, intensity, force) => Box::new(MortarBullet::new(radius, intensity, force)),
             BulletType::Laser (_, _) => {
                 panic!("Server::shoot is not equipped to fire lasers!");
             }
@@ -544,9 +549,11 @@ impl Server {
                     }
                 }
             }
-            let mut vec = (self.objects[i].exposed_properties.physics.vector_position() - origin).inv();
-            vec.lim(1.0);
-            self.objects[i].exposed_properties.physics.velocity += vec * force;
+            if !self.objects[i].exposed_properties.physics.fixed {
+                let mut vec = (self.objects[i].exposed_properties.physics.vector_position() - origin).inv();
+                vec.lim(1.0);
+                self.objects[i].exposed_properties.physics.velocity += vec * force;
+            }
         }
         self.broadcast(ServerToClient::Blast (origin.x, origin.y, radius, intensity));
     }
@@ -2112,6 +2119,9 @@ async fn main(){
                                 b't' => {
                                     server.place_tie_fighter(x, y, 0.0, banner);
                                 },
+                                b'A' => {
+                                    server.place_artillery(x, y, 0.0, banner);
+                                }
                                 b's' => {
                                     server.place_sniper(x, y, 0.0, banner);
                                 },

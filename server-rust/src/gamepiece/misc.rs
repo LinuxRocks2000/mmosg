@@ -15,6 +15,11 @@ use std::f32::consts::PI;
 
 pub struct Bullet {}
 pub struct AntiRTFBullet {}
+pub struct MortarBullet {
+    radius : f32,
+    intensity : f32,
+    force : f32
+}
 pub struct Wall {}
 pub struct Chest {}
 pub struct Turret {
@@ -61,6 +66,12 @@ impl Bullet {
 impl LaserMissile {
     pub fn new() -> Self {
         Self {}
+    }
+}
+
+impl MortarBullet {
+    pub fn new(radius : f32, intensity : f32, force : f32) -> Self {
+        Self { radius, intensity, force }
     }
 }
 
@@ -249,6 +260,24 @@ impl GamePiece for Bullet {
     }
 }
 
+impl GamePiece for MortarBullet {
+    fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
+        thing.ttl = 30;
+        thing.health_properties.max_health = 1.0;
+        thing.exploder = vec![
+            ExplosionMode::Blast (self.radius, self.intensity, self.force)
+        ];
+    }
+
+    fn obtain_physics(&self) -> PhysicsObject {
+        PhysicsObject::new(0.0, 0.0, 10.0, 20.0, 0.0)
+    }
+
+    fn identify(&self) -> char {
+        'M'
+    }
+}
+
 impl GamePiece for Carrier {
     fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
         thing.health_properties.max_health = 1.0;
@@ -256,7 +285,7 @@ impl GamePiece for Carrier {
         thing.collision_info.damage = 1.0;
         thing.physics.speed_cap = 12.0;
         thing.carrier_properties.space_remaining = 10;
-        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't', 'T', 'n', 'm', 'g', 'G', 'H'];
+        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't', 'T', 'n', 'm', 'g', 'G', 'H', 'A'];
         thing.health_properties.prevent_friendly_fire = true;
     }
 
@@ -432,7 +461,10 @@ impl GamePiece for AntiRTFBullet {
         thing.targeting.filter = TargetingFilter::RealTimeFighter;
         thing.targeting.range = (0.0, 5000.0); // losing these guys is possible, but not easy
         thing.health_properties.max_health = 1.0;
-        thing.collision_info.damage = 5.0;
+        thing.collision_info.damage = 2.0;
+        thing.exploder = vec![
+            ExplosionMode::Blast(100.0, 5.0, 1400.0)
+        ];
     }
 
     fn obtain_physics(&self) -> PhysicsObject {
@@ -478,6 +510,9 @@ impl GamePiece for Air2Air {
         thing.health_properties.max_health = 1.0;
         thing.collision_info.damage = 5.0;
         thing.ttl = 300;
+        thing.exploder = vec![
+            ExplosionMode::Blast(100.0, 5.0, 1400.0)
+        ];
     }
 
     fn obtain_physics(&self) -> PhysicsObject {
