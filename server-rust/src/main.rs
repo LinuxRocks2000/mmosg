@@ -266,7 +266,7 @@ impl Server {
 
     fn is_clear(&self, x : f32, y : f32) -> bool {
         for obj in &self.objects {
-            if self.object_field_check(obj.exposed_properties.physics.shape, x, y, 800.0) {
+            if self.object_field_check(obj.exposed_properties.physics.shape, x, y, if obj.identify() == 'c' { 2000.0 } else { 800.0 }) {
                 return false; // short circuit
             }
         }
@@ -550,9 +550,12 @@ impl Server {
                 }
             }
             if !self.objects[i].exposed_properties.physics.fixed {
-                let mut vec = (self.objects[i].exposed_properties.physics.vector_position() - origin).inv();
-                vec.lim(1.0);
-                self.objects[i].exposed_properties.physics.velocity += vec * force;
+                let mut vec = self.objects[i].exposed_properties.physics.vector_position() - origin;
+                if vec.magnitude() < force {
+                    vec = vec.inv() * force;
+                    vec.lim(1.0);
+                    self.objects[i].exposed_properties.physics.velocity += vec;
+                }
             }
         }
         self.broadcast(ServerToClient::Blast (origin.x, origin.y, radius, intensity));

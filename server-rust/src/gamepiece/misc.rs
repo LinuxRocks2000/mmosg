@@ -219,6 +219,13 @@ impl GamePiece for GreenThumb {
     }
 
     fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
+        let mut thrust = Vector2::new(properties.goal_x - properties.physics.cx(), properties.goal_y - properties.physics.cy());
+        if thrust.magnitude() > 10.0 {
+            thrust = thrust.unit() * 0.25;
+            properties.physics.set_angle(thrust.angle());
+            properties.physics.velocity = properties.physics.velocity + thrust;
+        }
+        properties.physics.velocity = properties.physics.velocity * 0.95;
         self.countdown -= 1;
         if self.countdown == 0 {
             self.countdown = (800 + 800) / 30 + 20; // there are 30 chests around it, 1600 is the average chest lifetime, add a bit to keep from overlapping.
@@ -583,6 +590,10 @@ impl GamePiece for Wall {
     fn does_grant_a2a(&self) -> bool {
         true
     }
+
+    fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {
+        properties.physics.velocity *= 0.99;
+    }
 }
 
 impl GamePiece for Seed {
@@ -666,20 +677,29 @@ impl GamePiece for Turret {
     }
 
     fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {
-        match properties.targeting.vector_to {
-            Some(vector) => {
-                properties.physics.set_angle(vector.angle());
-                properties.shooter_properties.suppress = false;
-                if properties.carrier_properties.is_carried {
+        let mut thrust = Vector2::new(properties.goal_x - properties.physics.cx(), properties.goal_y - properties.physics.cy());
+        if thrust.magnitude() < 10.0 {
+            match properties.targeting.vector_to {
+                Some(vector) => {
+                    properties.physics.set_angle(vector.angle());
                     properties.shooter_properties.suppress = false;
+                    if properties.carrier_properties.is_carried {
+                        properties.shooter_properties.suppress = false;
+                    }
+                },
+                None => {
+                    if properties.carrier_properties.is_carried || self.is_laser_turret {
+                        properties.shooter_properties.suppress = true;
+                    }
                 }
-            },
-            None => {
-                if properties.carrier_properties.is_carried || self.is_laser_turret {
-                    properties.shooter_properties.suppress = true;
-                }
-            }
-        };
+            };
+        }
+        else {
+            thrust = thrust.unit() * 0.25;
+            properties.physics.set_angle(thrust.angle());
+            properties.physics.velocity = properties.physics.velocity + thrust;
+        }
+        properties.physics.velocity = properties.physics.velocity * 0.95;
     }
 
     fn get_does_collide(&self, id : char) -> bool {
@@ -836,6 +856,9 @@ impl GamePiece for LaserMissile {
         me.shooter_properties.counter = 1;
         me.shooter_properties.shoot = true;
         me.carrier_properties.can_update = true;
+        me.exploder = vec![
+            ExplosionMode::Blast(100.0, 1.5, 400.0)
+        ];
     }
 
     fn obtain_physics(&self) -> PhysicsObject {
