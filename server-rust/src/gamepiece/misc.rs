@@ -114,9 +114,9 @@ impl Air2Air {
 }
 
 impl Turret {
-    pub fn new() -> Self {
+    pub fn new(is_laser_turret : bool) -> Self {
         Self {
-            is_laser_turret : false
+            is_laser_turret
         }
     }
 }
@@ -652,6 +652,7 @@ impl GamePiece for Turret {
     }
 
     fn cost(&self) -> i32 {
+        println!("Is laser turret? {}", self.is_laser_turret);
         if self.is_laser_turret {
             200
         }
@@ -666,7 +667,6 @@ impl GamePiece for Turret {
                 properties.targeting.filter = TargetingFilter::Farmer;
                 properties.shooter_properties.bullet_type = BulletType::Laser (0.3, 1000.0);
                 properties.shooter_properties.counter = 1;
-                self.is_laser_turret = true;
             },
             _ => {}
         }

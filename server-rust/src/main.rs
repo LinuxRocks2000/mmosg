@@ -381,11 +381,11 @@ impl Server {
     }
 
     fn place_turret(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
-        self.place(Box::new(Turret::new()), x, y, a, sender)
+        self.place(Box::new(Turret::new(false)), x, y, a, sender)
     }
 
     fn place_laser_turret(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
-        let thing = self.place(Box::new(Turret::new()), x, y, a, sender);
+        let thing = self.place(Box::new(Turret::new(true)), x, y, a, sender);
         self.upgrade(thing, "laser".to_string());
         thing
     }
