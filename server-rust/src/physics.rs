@@ -151,6 +151,20 @@ impl BoxShape {
         (false, Vector2::empty())
     }
 
+    pub fn circle_collide(&self, origin : Vector2, radius : f32) -> bool {
+        let origin = origin.rotate_about(Vector2::new(self.x, self.y), -self.a);
+        let dist = (origin - Vector2::new(self.x, self.y)).abs();
+        if (dist.x > self.w / 2.0 + radius) || 
+           (dist.y > self.h / 2.0 + radius) {
+            return false;
+        }
+        if (dist.x < self.w / 2.0) || 
+           (dist.y < self.h / 2.0) {
+            return true;
+        }
+        Vector2::new(dist.x - self.w / 2.0, dist.y - self.h / 2.0).mag2() < radius * radius
+    }
+
     pub fn translate(&mut self, velocity : Vector2) {
         self.x += velocity.x;
         self.y += velocity.y;

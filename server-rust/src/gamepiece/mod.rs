@@ -125,7 +125,8 @@ pub struct ExposedProperties { // everything a GamePieceBase wants to expose to 
 #[derive(Clone)]
 pub enum ExplosionMode {
     None,
-    Radiation (f32, f32, f32)
+    Radiation (f32, f32, f32),
+    Blast (f32, f32, f32) // radius, intensity, force
 }
 
 
@@ -568,9 +569,12 @@ impl GamePieceBase {
         self.piece.on_die(self.banner, server);
         for explosion in &self.exposed_properties.exploder {
             match explosion {
-                ExplosionMode::Radiation(size, halflife, strength) => {
+                ExplosionMode::Radiation (size, halflife, strength) => {
                     server.place_radiation(self.exposed_properties.physics.cx(), self.exposed_properties.physics.cy(), *size, *halflife, *strength, self.exposed_properties.physics.angle(), None);
                 },
+                ExplosionMode::Blast (radius, intensity, force) => {
+                    server.blast(self.exposed_properties.physics.vector_position(), *radius, *intensity, *force, Some(self.banner));
+                }
                 _ => {
 
                 }

@@ -6,6 +6,7 @@ use crate::physics::PhysicsObject;
 use crate::vector::Vector2;
 use crate::ExposedProperties;
 use crate::BulletType;
+use crate::ExplosionMode;
 
 
 pub struct BasicFighter {}
@@ -174,6 +175,14 @@ impl GamePiece for Sniper {
 impl GamePiece for Missile {
     fn obtain_physics(&self) -> PhysicsObject {
         PhysicsObject::new(0.0, 0.0, 48.0, 20.0, 0.0)
+    }
+
+    fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
+        thing.collision_info.damage = 0.5;
+        thing.health_properties.max_health = 0.5; // collisions with themselves will detonate both. collisions with other things do 2 damage to the other thing - 0.5 from the collison, 1.5 from the blast.
+        thing.exploder = vec![
+            ExplosionMode::Blast(100.0, 1.5, 400.0)
+        ];
     }
 
     fn identify(&self) -> char {

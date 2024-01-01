@@ -742,7 +742,7 @@ impl GamePiece for Radiation {
 impl GamePiece for Nuke {
     fn construct<'a>(&'a self, thing : &mut ExposedProperties) {
         thing.exploder = vec![
-            ExplosionMode::Radiation(200.0, 60.0, 0.3),
+            ExplosionMode::Blast(1000.0, 4.0, 10000.0),
             ExplosionMode::Radiation(1500.0, 250.0, 0.3),
             ExplosionMode::Radiation(6000.0, 700.0, 0.3)
         ];

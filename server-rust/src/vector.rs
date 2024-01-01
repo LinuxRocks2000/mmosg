@@ -138,6 +138,30 @@ impl Vector2 {
     pub fn perpendicular(&self) -> Self { // returns a right-flipped vector. useful for projection.
         Vector2::new_from_manda(self.magnitude(), self.angle() + PI/2.0)
     }
+
+    pub fn inv2(&self) -> Self {
+        let mag2 = self.mag2();
+        if mag2 == 0.0 {
+            Vector2::empty()
+        }
+        else {
+            Vector2::new_from_manda(1.0 / mag2, self.angle())
+        }
+    }
+
+    pub fn inv(&self) -> Self {
+        let mag = self.magnitude();
+        if mag == 0.0 {
+            Vector2::empty()
+        }
+        else {
+            Vector2::new_from_manda(1.0 / mag, self.angle())
+        }
+    }
+
+    pub fn abs(&self) -> Self {
+        Vector2::new(self.x.abs(), self.y.abs())
+    }
 }
 
 impl std::fmt::Debug for Vector2 {

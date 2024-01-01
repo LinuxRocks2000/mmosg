@@ -93,7 +93,8 @@ pub enum ServerToClient {
     YouAreGod, // you are God
     // TODO: make God and Leprechaun and etc part of EasterEgg(u16)
     Leprechaun, // we enable the leppy kaun
-    CastLaser (f32, f32, f32, f32, f32, u8) // x, y, x2, y2, intensity, caster type
+    CastLaser (f32, f32, f32, f32, f32, u8), // x, y, x2, y2, intensity, caster type
+    Blast (f32, f32, f32, f32) // x, y, radius, intensity
 }
 
 #[derive(ProtocolFrame, Debug, Clone)]
@@ -526,11 +527,28 @@ impl Server {
         if let Some(i) = winner {
             self.objects[i].damage(intensity);
             if let Some(banner) = originbanner {
-                if self.objects[i].dead() {
+                if self.objects[i].dead() && self.objects[i].get_banner() != banner {
                     self.score_to(banner, self.objects[i].capture() as i32);
                 }
             }
         }
+    }
+
+    pub fn blast(&mut self, origin : Vector2, radius : f32, intensity : f32, force : f32, originbanner : Option<usize>) {
+        for i in 0..self.objects.len() {
+            if self.objects[i].exposed_properties.physics.shape.circle_collide(origin, radius) {
+                self.objects[i].damage(intensity);
+                if let Some(banner) = originbanner {
+                    if self.objects[i].dead() && self.objects[i].get_banner() != banner {
+                        self.score_to(banner, self.objects[i].capture() as i32);
+                    }
+                }
+            }
+            let mut vec = (self.objects[i].exposed_properties.physics.vector_position() - origin).inv();
+            vec.lim(1.0);
+            self.objects[i].exposed_properties.physics.velocity += vec * force;
+        }
+        self.broadcast(ServerToClient::Blast (origin.x, origin.y, radius, intensity));
     }
 
     fn carry_tasks(&mut self, carrier : usize, carried : usize) { // expects that you've already done the lookups - this is the result of a very effective premature optimization in the physics engine
