@@ -30,6 +30,7 @@ pub struct GreenThumb {
     countdown : u16
 }
 pub struct LaserMissile {}
+pub struct PlasmaCutter {}
 pub struct Carrier {
     angle_v : f32,
     green_thumbs : u16,
@@ -64,6 +65,12 @@ impl Bullet {
 }
 
 impl LaserMissile {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl PlasmaCutter {
     pub fn new() -> Self {
         Self {}
     }
@@ -292,7 +299,7 @@ impl GamePiece for Carrier {
         thing.collision_info.damage = 1.0;
         thing.physics.speed_cap = 12.0;
         thing.carrier_properties.space_remaining = 10;
-        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't', 'T', 'n', 'm', 'g', 'G', 'H', 'A'];
+        thing.carrier_properties.does_accept = vec!['f', 'h', 's', 't', 'T', 'n', 'm', 'g', 'G', 'H', 'A', 'p'];
         thing.health_properties.prevent_friendly_fire = true;
     }
 
@@ -678,7 +685,7 @@ impl GamePiece for Turret {
 
     fn update(&mut self, properties : &mut ExposedProperties, _server : &mut Server) {
         let mut thrust = Vector2::new(properties.goal_x - properties.physics.cx(), properties.goal_y - properties.physics.cy());
-        if thrust.magnitude() < 10.0 {
+        if thrust.magnitude() < 10.0 || properties.carrier_properties.is_carried {
             match properties.targeting.vector_to {
                 Some(vector) => {
                     properties.physics.set_angle(vector.angle());
@@ -852,7 +859,7 @@ impl GamePiece for Block {
 
 impl GamePiece for LaserMissile {
     fn construct(&self, me : &mut ExposedProperties) {
-        me.shooter_properties.bullet_type = BulletType::Laser (0.3, 50000.0);
+        me.shooter_properties.bullet_type = BulletType::Laser (0.2, 50000.0);
         me.shooter_properties.counter = 1;
         me.shooter_properties.shoot = true;
         me.carrier_properties.can_update = true;
@@ -900,6 +907,85 @@ impl GamePiece for LaserMissile {
             let thrust = Vector2::new_from_manda(0.3, properties.physics.angle());
             properties.physics.velocity = properties.physics.velocity + thrust;
             properties.physics.velocity = properties.physics.velocity * 0.98;
+        }
+    }
+
+    fn is_editable(&self) -> bool {
+        true
+    }
+}
+
+impl GamePiece for PlasmaCutter {
+    fn construct(&self, me : &mut ExposedProperties) {
+        me.shooter_properties.bullet_type = BulletType::Laser (1.5, 100.0);
+        me.shooter_properties.counter = 0;
+        me.shooter_properties.shoot = true;
+        me.carrier_properties.can_update = true;
+        me.physics.speed_cap = 10.0;
+        me.exploder = vec![
+            ExplosionMode::Blast(100.0, 1.5, 400.0)
+        ];
+    }
+
+    fn obtain_physics(&self) -> PhysicsObject {
+        PhysicsObject::new(0.0, 0.0, 48.0, 20.0, 0.0)
+    }
+
+    fn identify(&self) -> char {
+        'p'
+    }
+
+    fn get_does_collide(&self, _id : char) -> bool {
+        true
+    }
+
+    fn cost(&self) -> i32 {
+        30
+    }
+
+    fn update(&mut self, properties : &mut ExposedProperties, server : &mut Server) {
+        if properties.carrier_properties.is_carried {
+            properties.shooter_properties.suppress = false;
+            if let Some(carrier) = server.obj_lookup(properties.carrier_properties.carrier) {
+                if properties.carrier_properties.berth > 7 {
+                    properties.physics.set_angle(server.objects[carrier].exposed_properties.physics.angle());
+                }
+                else if properties.carrier_properties.berth < 2 {
+                    properties.physics.set_angle(server.objects[carrier].exposed_properties.physics.angle() + PI);
+                }
+                else if properties.carrier_properties.berth % 2 == 0 {
+                    properties.physics.set_angle(server.objects[carrier].exposed_properties.physics.angle() - PI / 2.0);
+                }
+                else {
+                    properties.physics.set_angle(server.objects[carrier].exposed_properties.physics.angle() + PI / 2.0);
+                }
+            }
+        }
+        else {
+            let vec_to = Vector2::new(properties.goal_x - properties.physics.cx(), properties.goal_y - properties.physics.cy());
+            let mut thrust = Vector2::new_from_manda(1.0, properties.physics.angle());
+            let mut l = loopize(properties.physics.angle(), vec_to.angle());
+            if l.abs() > 3.0 * PI/4.0 {
+                l = loopize(properties.physics.angle() - PI, vec_to.angle());
+                thrust *= -1.0;
+            }
+            if vec_to.magnitude() < 10.0 {
+                l = loopize(properties.physics.angle(), properties.goal_a);
+                properties.shooter_properties.suppress = false;
+            }
+            else {
+                properties.physics.velocity = properties.physics.velocity + thrust;
+                let mut perp = vec_to.perpendicular();
+                let dot = properties.physics.velocity.dot(perp);
+                perp.set_magnitude(dot / 2.0);
+                properties.physics.velocity += perp * -1.0;
+                properties.shooter_properties.suppress = true;
+            }
+            if loopize(properties.physics.velocity.angle(), vec_to.angle()).abs() > PI / 2.0 { // if it's going in the wrong direction
+                properties.physics.velocity *= 0.2; // airbrake
+            }
+            properties.physics.angle_v = -l * 3.0/4.0;
+            properties.physics.set_angle(properties.physics.angle() + properties.physics.angle_v);
         }
     }
 

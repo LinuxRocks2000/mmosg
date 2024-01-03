@@ -385,6 +385,10 @@ impl Server {
         self.place(Box::new(LaserMissile::new()), x, y, a, sender)
     }
 
+    fn place_plasma_cutter(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
+        self.place(Box::new(PlasmaCutter::new()), x, y, a, sender)
+    }
+
     fn place_turret(&mut self, x : f32, y : f32, a : f32, sender : Option<usize>) -> u32 {
         self.place(Box::new(Turret::new(false)), x, y, a, sender)
     }
@@ -551,7 +555,7 @@ impl Server {
             }
             if !self.objects[i].exposed_properties.physics.fixed {
                 let mut vec = self.objects[i].exposed_properties.physics.vector_position() - origin;
-                if vec.magnitude() < force {
+                if vec.magnitude() < force * 3.0 {
                     vec = vec.inv() * force;
                     vec.lim(1.0);
                     self.objects[i].exposed_properties.physics.velocity += vec;
@@ -2134,6 +2138,9 @@ async fn main(){
                                 b'H' => {
                                     server.place_laser_missile(x, y, 0.0, banner);
                                 }
+                                b'p' => {
+                                    server.place_plasma_cutter(x, y, 0.0, banner);
+                                }
                                 b'T' => {
                                     server.place_turret(x, y, 0.0, banner);
                                 },
@@ -2297,43 +2304,45 @@ async fn main(){
                             }
                             server.costs = false;
                             let castle = server.place_castle(x, y, mode == ClientMode::RealTimeFighter, Some(banner));
-                            server.broadcast_tx.send(ClientCommand::SetCastle (banner, castle)).unwrap();
-                            match mode {
-                                ClientMode::Normal => {
-                                    server.place_basic_fighter(x - 200.0, y, PI, Some(banner));
-                                    server.place_basic_fighter(x + 200.0, y, 0.0, Some(banner));
-                                    server.place_basic_fighter(x, y - 200.0, 0.0, Some(banner));
-                                    server.place_basic_fighter(x, y + 200.0, 0.0, Some(banner));
-                                    server.broadcast_tx.send(ClientCommand::ScoreTo (banner, 100)).unwrap();
-                                },
-                                ClientMode::RealTimeFighter => {
-                                    server.place_basic_fighter(x - 100.0, y, PI, Some(banner));
-                                    server.place_basic_fighter(x + 100.0, y, 0.0, Some(banner));
-                                    server.broadcast_tx.send(ClientCommand::GrantA2A (banner)).unwrap();
-                                },
-                                ClientMode::Defense => {
-                                    server.place_basic_fighter(x - 200.0, y, PI, Some(banner));
-                                    server.place_basic_fighter(x + 200.0, y, 0.0, Some(banner));
-                                    server.place_turret(x, y - 200.0, 0.0, Some(banner));
-                                    server.place_turret(x, y + 200.0, 0.0, Some(banner));
-                                    server.broadcast_tx.send(ClientCommand::ScoreTo (banner, 25)).unwrap();
-                                },
-                                _ => {
+                            if let Some(_) = server.obj_lookup(castle) {
+                                server.broadcast_tx.send(ClientCommand::SetCastle (banner, castle)).unwrap();
+                                match mode {
+                                    ClientMode::Normal => {
+                                        server.place_basic_fighter(x - 200.0, y, PI, Some(banner));
+                                        server.place_basic_fighter(x + 200.0, y, 0.0, Some(banner));
+                                        server.place_basic_fighter(x, y - 200.0, 0.0, Some(banner));
+                                        server.place_basic_fighter(x, y + 200.0, 0.0, Some(banner));
+                                        server.broadcast_tx.send(ClientCommand::ScoreTo (banner, 100)).unwrap();
+                                    },
+                                    ClientMode::RealTimeFighter => {
+                                        server.place_basic_fighter(x - 100.0, y, PI, Some(banner));
+                                        server.place_basic_fighter(x + 100.0, y, 0.0, Some(banner));
+                                        server.broadcast_tx.send(ClientCommand::GrantA2A (banner)).unwrap();
+                                    },
+                                    ClientMode::Defense => {
+                                        server.place_basic_fighter(x - 200.0, y, PI, Some(banner));
+                                        server.place_basic_fighter(x + 200.0, y, 0.0, Some(banner));
+                                        server.place_turret(x, y - 200.0, 0.0, Some(banner));
+                                        server.place_turret(x, y + 200.0, 0.0, Some(banner));
+                                        server.broadcast_tx.send(ClientCommand::ScoreTo (banner, 25)).unwrap();
+                                    },
+                                    _ => {
 
+                                    }
                                 }
+                                // shamelessly copy/pasted from LivePlayerInc. clean up when the dust settles!
+                                server.costs = true;
+                                if mode != ClientMode::RealTimeFighter {
+                                    println!("{:?} isn't an rtf", mode);
+                                    server.isnt_rtf += 1;
+                                }
+                                server.living_players += 1;
+                                if team.is_some() {
+                                    server.teams[team.unwrap()].members.push(banner);
+                                    server.broadcast(ServerToClient::BannerAddToTeam (banner as u32, server.teams[team.unwrap()].banner_id as u32));
+                                }
+                                println!("New live player. Living players: {}", server.living_players);
                             }
-                            // shamelessly copy/pasted from LivePlayerInc. clean up when the dust settles!
-                            server.costs = true;
-                            if mode != ClientMode::RealTimeFighter {
-                                println!("{:?} isn't an rtf", mode);
-                                server.isnt_rtf += 1;
-                            }
-                            server.living_players += 1;
-                            if team.is_some() {
-                                server.teams[team.unwrap()].members.push(banner);
-                                server.broadcast(ServerToClient::BannerAddToTeam (banner as u32, server.teams[team.unwrap()].banner_id as u32));
-                            }
-                            println!("New live player. Living players: {}", server.living_players);
                         },
                         Some (ServerCommand::Place (PlaceCommand::A2A (castle, target, banner))) => {
                             let target_i = match server.obj_lookup(target) { Some(i) => i, None => continue };

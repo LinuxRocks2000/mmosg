@@ -385,7 +385,7 @@ impl GamePieceBase {
                 },
                 TargetingFilter::Farmer => {
                     match object.identify() {
-                        'C' | 'h' | 'b' | 'M' => true,
+                        'C' | 'h' | 'b' | 'M' | 'H' | 'p' => true,
                         _ => false
                     }
                 }
