@@ -2322,8 +2322,8 @@ async fn main(){
                                     ClientMode::Defense => {
                                         server.place_basic_fighter(x - 200.0, y, PI, Some(banner));
                                         server.place_basic_fighter(x + 200.0, y, 0.0, Some(banner));
-                                        server.place_turret(x, y - 200.0, 0.0, Some(banner));
-                                        server.place_turret(x, y + 200.0, 0.0, Some(banner));
+                                        server.place_laser_turret(x, y - 200.0, 0.0, Some(banner));
+                                        server.place_laser_turret(x, y + 200.0, 0.0, Some(banner));
                                         server.broadcast_tx.send(ClientCommand::ScoreTo (banner, 25)).unwrap();
                                     },
                                     _ => {
